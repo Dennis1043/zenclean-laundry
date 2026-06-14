@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>ZenClean Laundry - Receipt {{ order.order_number }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            width: 300px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #333;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .business-name {
+            font-size: 24px;
+            font-weight: bold;
+        }
+        .receipt-title {
+            text-align: center;
+            font-size: 18px;
+            margin: 10px 0;
+        }
+        .details {
+            margin: 20px 0;
+        }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+        }
+        .total {
+            font-weight: bold;
+            border-top: 1px dashed #333;
+            padding-top: 10px;
+            margin-top: 10px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 12px;
+            color: #666;
+        }
+        @media print {
+            body { margin: 0; padding: 10px; }
+            .no-print { display: none; }
+        }
+        .no-print {
+            text-align: center;
+            margin-top: 20px;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="business-name">ZenClean Laundry</div>
+        <div>Quality Dry Cleaning & Laundry</div>
+        <div>Tel: 0712345678</div>
+    </div>
+    
+    <div class="receipt-title">SALES RECEIPT</div>
+    
+    <div class="details">
+        <div class="row">
+            <span>Order #:</span>
+            <strong>{{ order.order_number }}</strong>
+        </div>
+        <div class="row">
+            <span>Date:</span>
+            <span>{{ order.created_at|date:"Y-m-d H:i" }}</span>
+        </div>
+        <div class="row">
+            <span>Customer:</span>
+            <span>{{ order.customer.name }}</span>
+        </div>
+        <div class="row">
+            <span>Phone:</span>
+            <span>{{ order.customer.phone }}</span>
+        </div>
+        {% if order.items_description %}
+        <div class="row">
+            <span>Items:</span>
+            <span>{{ order.items_description|truncatechars:30 }}</span>
+        </div>
+        {% endif %}
+        <div class="row">
+            <span>Weight:</span>
+            <span>{{ order.weight_kg }} kg</span>
+        </div>
+        <div class="row">
+            <span>Rate:</span>
+            <span>KSh {{ order.price_per_kg }}/kg</span>
+        </div>
+        <div class="row total">
+            <span>TOTAL:</span>
+            <strong>KSh {{ order.total_amount|floatformat:0 }}</strong>
+        </div>
+        <div class="row">
+            <span>Paid:</span>
+            <span>KSh {{ order.paid_amount|floatformat:0 }}</span>
+        </div>
+        <div class="row">
+            <span>Balance:</span>
+            <span>KSh {% widthratio order.total_amount 1 0 %}</span>
+        </div>
+        <div class="row">
+            <span>Status:</span>
+            <span>{{ order.get_status_display }}</span>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <div>Thank you for choosing ZenClean!</div>
+        <div>Your clothes will be ready in 24 hours</div>
+        <div>Follow us on Instagram: @ZenClean</div>
+    </div>
+    
+    <div class="no-print">
+        <button onclick="window.print()">Print Receipt</button>
+        <button onclick="window.close()">Close</button>
+    </div>
+</body>
+</html>

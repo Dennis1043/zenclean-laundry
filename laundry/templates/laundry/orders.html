@@ -1,0 +1,353 @@
+﻿{% extends 'base/base.html' %}
+{% block title %}Orders{% endblock %}
+{% block page_title %}Orders Management{% endblock %}
+
+{% block extra_css %}
+<style>
+    .filter-bar {
+        background: white;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .filter-group {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .filter-btn {
+        padding: 5px 15px;
+        border-radius: 20px;
+        border: 1px solid #ddd;
+        background: white;
+        cursor: pointer;
+    }
+    .filter-btn.active {
+        background: #3498db;
+        color: white;
+        border-color: #3498db;
+    }
+    .filter-btn:hover {
+        background: #3498db;
+        color: white;
+    }
+    .search-box {
+        flex: 1;
+        min-width: 200px;
+    }
+    .search-box input {
+        width: 100%;
+        padding: 6px 12px;
+        border: 1px solid #ddd;
+        border-radius: 20px;
+    }
+    .order-card {
+        background: white;
+        border-radius: 10px;
+        padding: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .order-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+    .order-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #eee;
+    }
+    .order-number {
+        font-size: 18px;
+        font-weight: bold;
+        color: #2c3e50;
+    }
+    .order-date {
+        color: #7f8c8d;
+        font-size: 12px;
+    }
+    .customer-info {
+        margin-bottom: 10px;
+    }
+    .customer-name {
+        font-weight: bold;
+        font-size: 16px;
+    }
+    .customer-phone {
+        color: #7f8c8d;
+        font-size: 13px;
+    }
+    .order-details {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 15px;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .detail-item {
+        text-align: center;
+        flex: 1;
+    }
+    .detail-label {
+        font-size: 11px;
+        color: #7f8c8d;
+        text-transform: uppercase;
+    }
+    .detail-value {
+        font-size: 18px;
+        font-weight: bold;
+    }
+    .amount {
+        color: #27ae60;
+    }
+    .balance {
+        color: #e74c3c;
+    }
+    .order-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+    }
+    .badge-received { background: #f39c12; color: white; }
+    .badge-washing { background: #3498db; color: white; }
+    .badge-drying { background: #3498db; color: white; }
+    .badge-folding { background: #3498db; color: white; }
+    .badge-ready { background: #27ae60; color: white; }
+    .badge-completed { background: #95a5a6; color: white; }
+    .badge-cancelled { background: #e74c3c; color: white; }
+    .status-select, .payment-select {
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 5px;
+        border: 1px solid #ddd;
+    }
+    .btn-icon {
+        padding: 5px 10px;
+        font-size: 12px;
+        border-radius: 5px;
+        text-decoration: none;
+        display: inline-block;
+    }
+    .btn-info {
+        background: #3498db;
+        color: white;
+    }
+    .btn-warning {
+        background: #f39c12;
+        color: white;
+    }
+
+    /* Add these badge classes to your style block */
+.badge-received, .badge-washing, .badge-drying, 
+.badge-folding, .badge-ready, .badge-completed, 
+.badge-cancelled {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: bold;
+}
+.badge-received { background: #f39c12; color: white; }
+.badge-washing { background: #3498db; color: white; }
+.badge-drying { background: #3498db; color: white; }
+.badge-folding { background: #3498db; color: white; }
+.badge-ready { background: #27ae60; color: white; }
+.badge-completed { background: #95a5a6; color: white; }
+.badge-cancelled { background: #e74c3c; color: white; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="filter-bar">
+    <div class="filter-group">
+        <div class="search-box">
+            <input type="text" id="searchInput" placeholder="Search by order number or customer..." onkeyup="filterOrders()">
+        </div>
+        <div>
+            <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">All</button>
+            <button class="filter-btn" data-filter="received" onclick="setFilter('received')">Received</button>
+            <button class="filter-btn" data-filter="washing" onclick="setFilter('washing')">Washing</button>
+            <button class="filter-btn" data-filter="drying" onclick="setFilter('drying')">Drying</button>
+            <button class="filter-btn" data-filter="folding" onclick="setFilter('folding')">Folding</button>
+            <button class="filter-btn" data-filter="ready" onclick="setFilter('ready')">Ready</button>
+            <button class="filter-btn" data-filter="completed" onclick="setFilter('completed')">Completed</button>
+        </div>
+        <a href="{% url 'order_create' %}" class="btn btn-custom btn-sm">+ New Order</a>
+    </div>
+</div>
+
+<div id="ordersContainer">
+    {% for order in orders %}
+    <div class="order-card" data-status="{{ order.status }}" data-search="{{ order.order_number }} {{ order.customer.name }} {{ order.customer.phone }}">
+        <div class="order-header">
+            <div>
+                <span class="order-number">#{{ order.order_number }}</span>
+                <div class="order-date">{{ order.created_at|date:"D, M d, Y - H:i" }}</div>
+            </div>
+            <div>
+                <span class="badge badge-{{ order.status }}">
+                    {% if order.status == 'received' %}Received
+                    {% elif order.status == 'washing' %}Washing
+                    {% elif order.status == 'drying' %}Drying
+                    {% elif order.status == 'folding' %}Folding
+                    {% elif order.status == 'ready' %}Ready
+                    {% elif order.status == 'completed' %}Completed
+                    {% else %}Cancelled
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+        
+        <div class="customer-info">
+            <div class="customer-name">{{ order.customer.name }}</div>
+            <div class="customer-phone">Phone: {{ order.customer.phone }}</div>
+            {% if order.customer.location %}
+            <div class="customer-phone">Location: {{ order.customer.location }}</div>
+            {% endif %}
+        </div>
+        
+        <div class="order-details">
+            <div class="detail-item">
+                <div class="detail-label">Weight</div>
+                <div class="detail-value">{{ order.weight_kg }} kg</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Rate</div>
+                <div class="detail-value">KSh {{ order.price_per_kg }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Total</div>
+                <div class="detail-value amount">KSh {{ order.total_amount|floatformat:0 }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Paid</div>
+                <div class="detail-value">KSh {{ order.paid_amount|floatformat:0 }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Balance</div>
+                <div class="detail-value balance">KSh {{ order.remaining_balance|floatformat:0 }}</div>
+            </div>
+            <div class="detail-item">
+                <div class="detail-label">Collection</div>
+                <div class="detail-value">{% if order.collection_date %}{{ order.collection_date|date:"M d" }}{% else %}TBD{% endif %}</div>
+            </div>
+        </div>
+        
+        <div class="order-actions">
+    <select class="status-select" onchange="updateStatus({{ order.id }}, this.value)" style="width: 120px;">
+        <option value="received" {% if order.status == 'received' %}selected{% endif %}>📥 Received</option>
+        <option value="washing" {% if order.status == 'washing' %}selected{% endif %}>💧 Washing</option>
+        <option value="drying" {% if order.status == 'drying' %}selected{% endif %}>🌬️ Drying</option>
+        <option value="folding" {% if order.status == 'folding' %}selected{% endif %}>📦 Folding</option>
+        <option value="ready" {% if order.status == 'ready' %}selected{% endif %}>✅ Ready</option>
+        <option value="completed" {% if order.status == 'completed' %}selected{% endif %}>🎉 Completed</option>
+        <option value="cancelled" {% if order.status == 'cancelled' %}selected{% endif %}>❌ Cancelled</option>
+    </select>
+    
+    <select class="payment-select" onchange="updatePayment({{ order.id }}, this.value)" style="width: 110px;">
+        <option value="unpaid" {% if order.payment_status == 'unpaid' %}selected{% endif %}>💰 Unpaid</option>
+        <option value="partial" {% if order.payment_status == 'partial' %}selected{% endif %}>⏳ Partial</option>
+        <option value="paid" {% if order.payment_status == 'paid' %}selected{% endif %}>✅ Paid</option>
+    </select>
+    
+    <a href="{% url 'receipt' order.id %}" class="btn-icon btn-info" target="_blank">🖨️ Print</a>
+    <a href="{% url 'order_edit' order.id %}" class="btn-icon btn-warning">✏️ Edit</a>
+</div>
+    </div>
+    {% empty %}
+    <div class="stat-card text-center py-5">
+        <i class="fas fa-box-open fa-4x mb-3 text-muted"></i>
+        <h5>No Orders Yet</h5>
+        <p>Click "New Order" to create your first order.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+function updateStatus(orderId, status) {
+    fetch('/orders/status/' + orderId + '/' + status + '/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+    })
+    .then(function(response) {
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Error updating status');
+        }
+    });
+}
+
+function updatePayment(orderId, paymentStatus) {
+    fetch('/orders/payment/' + orderId + '/' + paymentStatus + '/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+    })
+    .then(function(response) {
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Error updating payment status');
+        }
+    });
+}
+
+function getCookie(name) {
+    var cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+            var cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+var currentFilter = 'all';
+
+function setFilter(filter) {
+    currentFilter = filter;
+    var buttons = document.querySelectorAll('.filter-btn');
+    for (var i = 0; i < buttons.length; i++) {
+        buttons[i].classList.remove('active');
+        if (buttons[i].getAttribute('data-filter') === filter) {
+            buttons[i].classList.add('active');
+        }
+    }
+    filterOrders();
+}
+
+function filterOrders() {
+    var searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    var orders = document.querySelectorAll('.order-card');
+    
+    for (var i = 0; i < orders.length; i++) {
+        var order = orders[i];
+        var status = order.getAttribute('data-status');
+        var searchData = order.getAttribute('data-search').toLowerCase();
+        
+        var matchesFilter = (currentFilter === 'all' || status === currentFilter);
+        var matchesSearch = (searchTerm === '' || searchData.indexOf(searchTerm) !== -1);
+        
+        if (matchesFilter && matchesSearch) {
+            order.style.display = 'block';
+        } else {
+            order.style.display = 'none';
+        }
+    }
+}
+</script>
+{% endblock %}

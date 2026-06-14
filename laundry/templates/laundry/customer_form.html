@@ -1,0 +1,43 @@
+﻿{% extends 'base/base.html' %}
+{% block title %}Add Customer{% endblock %}
+{% block page_title %}Add New Customer{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="stat-card">
+            <form method="post">
+                {% csrf_token %}
+                {% for field in form %}
+                <div class="mb-3">
+                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}
+                    <small class="form-text text-muted">{{ field.help_text }}</small>
+                    {% endif %}
+                    {% for error in field.errors %}
+                    <div class="alert alert-danger mt-1">{{ error }}</div>
+                    {% endfor %}
+                </div>
+                {% endfor %}
+                
+                <div class="mt-4">
+                    <button type="submit" class="btn btn-custom">
+                        <i class="fas fa-save"></i> Save Customer
+                    </button>
+                    <a href="javascript:window.close()" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> Close
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// If this window was opened from another window, show a message
+if (window.opener) {
+    document.querySelector('.btn-secondary').innerHTML = '<i class="fas fa-times"></i> Close and Return to Order';
+}
+</script>
+{% endblock %}

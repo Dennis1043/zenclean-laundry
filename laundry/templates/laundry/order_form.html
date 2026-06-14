@@ -1,0 +1,145 @@
+﻿{% extends 'base/base.html' %}
+{% block title %}New Order{% endblock %}
+{% block page_title %}Create New Order{% endblock %}
+
+{% block extra_js %}
+<script>
+function calculateTotal() {
+    const weight = parseFloat(document.getElementById('id_weight_kg').value) || 0;
+    const price = parseFloat(document.getElementById('id_price_per_kg').value) || 0;
+    const total = weight * price;
+    document.getElementById('total_display').innerHTML = 'KSh ' + total.toFixed(2);
+}
+
+function checkCustomer() {
+    const phone = document.getElementById('customer_phone').value;
+    if (phone.length >= 10) {
+        fetch('/customers/find-by-phone/' + phone + '/')
+        .then(response => response.json())
+        .then(data => {
+            if (data.exists) {
+                document.getElementById('customer_name').value = data.name;
+                document.getElementById('customer_name').readOnly = true;
+                document.getElementById('existing_customer_id').value = data.id;
+            } else {
+                document.getElementById('customer_name').readOnly = false;
+                document.getElementById('existing_customer_id').value = '';
+            }
+        });
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const weightInput = document.getElementById('id_weight_kg');
+    const priceInput = document.getElementById('id_price_per_kg');
+    const phoneInput = document.getElementById('customer_phone');
+    
+    if (weightInput && priceInput) {
+        weightInput.addEventListener('input', calculateTotal);
+        priceInput.addEventListener('input', calculateTotal);
+        calculateTotal();
+    }
+    
+    if (phoneInput) {
+        phoneInput.addEventListener('input', checkCustomer);
+    }
+});
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="stat-card">
+            <form method="post">
+                {% csrf_token %}
+                
+                <div class="alert alert-info">
+                    <strong>Order Number:</strong> Will be auto-generated (e.g., ZC-YYMMDD-0001)
+                </div>
+                
+                <!-- Customer Fields -->
+                <div class="mb-3">
+                    <label class="form-label">Customer Phone Number *</label>
+                    <input type="text" id="customer_phone" name="customer_phone" class="form-control" placeholder="e.g., 0712345678" required>
+                    <small class="text-muted">Enter phone number - existing customer will be loaded automatically</small>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Customer Name *</label>
+                    <input type="text" id="customer_name" name="customer_name" class="form-control" placeholder="Customer full name" required>
+                    <input type="hidden" id="existing_customer_id" name="existing_customer_id" value="">
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Customer Location</label>
+                    <input type="text" id="customer_location" name="customer_location" class="form-control" placeholder="e.g., Westlands, CBD">
+                </div>
+                
+                <hr>
+                
+                <!-- Order Fields -->
+                <div class="mb-3">
+                    <label class="form-label">Items Description</label>
+                    <textarea name="items_description" class="form-control" rows="2" placeholder="e.g., 5 bedsheets, 3 jackets, 2 jeans"></textarea>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Weight (kg) *</label>
+                    <input type="number" name="weight_kg" id="id_weight_kg" class="form-control" step="0.1" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Price per kg (KSh)</label>
+                    <input type="number" name="price_per_kg" id="id_price_per_kg" class="form-control" step="1" value="100">
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Collection Date</label>
+                    <input type="date" name="collection_date" class="form-control">
+                    <small class="text-muted">When will the clothes be ready for pickup?</small>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-control">
+                        <option value="received">📥 Received</option>
+                        <option value="washing">💧 Washing</option>
+                        <option value="drying">🌬️ Drying</option>
+                        <option value="folding">📦 Folding</option>
+                        <option value="ready">✅ Ready</option>
+                        <option value="completed">🎉 Completed</option>
+                        <option value="cancelled">❌ Cancelled</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Payment Status</label>
+                    <select name="payment_status" class="form-control">
+                        <option value="unpaid">💰 Unpaid</option>
+                        <option value="partial">⏳ Partial</option>
+                        <option value="paid">✅ Paid</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Amount Paid (KSh)</label>
+                    <input type="number" name="paid_amount" class="form-control" step="1" value="0">
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Notes</label>
+                    <textarea name="notes" class="form-control" rows="2" placeholder="Any special instructions..."></textarea>
+                </div>
+                
+                <div class="alert alert-success mt-3">
+                    <strong>Total Amount:</strong> <span id="total_display">KSh 0</span>
+                </div>
+                
+                <button type="submit" class="btn btn-custom">Save Order</button>
+                <a href="{% url 'order_list' %}" class="btn btn-secondary">Cancel</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

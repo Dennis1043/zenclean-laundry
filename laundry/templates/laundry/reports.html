@@ -1,0 +1,184 @@
+﻿{% extends 'base/base.html' %}
+{% block title %}Reports{% endblock %}
+{% block page_title %}Financial Reports{% endblock %}
+
+{% block extra_css %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="row">
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="stat-value">{{ total_orders }}</div>
+            <p>Total Orders</p>
+            <small class="text-muted">All time</small>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="stat-value text-success">KSh {{ total_revenue|floatformat:0 }}</div>
+            <p>Total Revenue</p>
+            <small class="text-muted">From paid orders only</small>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="stat-value text-danger">KSh {{ total_expenses|floatformat:0 }}</div>
+            <p>Total Expenses</p>
+            <small class="text-muted">All time</small>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card text-center">
+            <div class="stat-value {% if total_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                KSh {{ total_profit|floatformat:0 }}
+            </div>
+            <p>Net Profit / Loss</p>
+            <small class="text-muted">Revenue - Expenses</small>
+        </div>
+    </div>
+</div>
+
+<!-- Revenue Breakdown -->
+<div class="row">
+    <div class="col-md-6">
+        <div class="stat-card">
+            <h5><i class="fas fa-chart-line"></i> Revenue Summary</h5>
+            <hr>
+            <div class="d-flex justify-content-between mb-2">
+                <span>Last 7 Days:</span>
+                <strong>KSh {{ weekly_revenue|floatformat:0 }}</strong>
+            </div>
+            <div class="d-flex justify-content-between mb-2">
+                <span>Last 30 Days:</span>
+                <strong>KSh {{ monthly_revenue|floatformat:0 }}</strong>
+            </div>
+            <div class="d-flex justify-content-between">
+                <span>Pending Collection:</span>
+                <strong class="text-warning">KSh {{ pending_revenue|floatformat:0 }}</strong>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="stat-card">
+            <h5><i class="fas fa-calculator"></i> Profitability Analysis</h5>
+            <hr>
+            <div class="d-flex justify-content-between mb-2">
+                <span>Total Revenue:</span>
+                <strong class="text-success">+KSh {{ total_revenue|floatformat:0 }}</strong>
+            </div>
+            <div class="d-flex justify-content-between mb-2">
+                <span>Total Expenses:</span>
+                <strong class="text-danger">-KSh {{ total_expenses|floatformat:0 }}</strong>
+            </div>
+            <div class="d-flex justify-content-between pt-2 border-top">
+                <span><strong>Net Profit:</strong></span>
+                <strong class="{% if total_profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                    {% if total_profit >= 0 %}+{% endif %}KSh {{ total_profit|floatformat:0 }}
+                </strong>
+            </div>
+            {% if total_revenue > 0 %}
+            <div class="progress mt-3">
+                <div class="progress-bar bg-success" role="progressbar" style="width: {{ total_revenue|floatformat:0|divisibleby:total_revenue|default:0 }}%">
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Daily Performance Chart -->
+<div class="stat-card">
+    <h5><i class="fas fa-chart-bar"></i> Last 7 Days Performance</h5>
+    <hr>
+    <canvas id="performanceChart" height="100"></canvas>
+</div>
+
+<script>
+const dailyData = {{ daily_data|safe }};
+const ctx = document.getElementById('performanceChart').getContext('2d');
+
+new Chart(ctx, {
+    type: 'bar',
+    data: {
+        labels: dailyData.map(d => d.date),
+        datasets: [
+            {
+                label: 'Revenue (KSh)',
+                data: dailyData.map(d => d.revenue),
+                backgroundColor: 'rgba(46, 204, 113, 0.7)',
+                borderColor: '#27ae60',
+                borderWidth: 1
+            },
+            {
+                label: 'Expenses (KSh)',
+                data: dailyData.map(d => d.expenses),
+                backgroundColor: 'rgba(231, 76, 60, 0.7)',
+                borderColor: '#e74c3c',
+                borderWidth: 1
+            },
+            {
+                label: 'Profit (KSh)',
+                data: dailyData.map(d => d.profit),
+                backgroundColor: 'rgba(52, 152, 219, 0.7)',
+                borderColor: '#3498db',
+                borderWidth: 1
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        scales: {
+            y: {
+                beginAtZero: true,
+                title: {
+                    display: true,
+                    text: 'Amount (KSh)'
+                }
+            },
+            x: {
+                title: {
+                    display: true,
+                    text: 'Date'
+                }
+            }
+        },
+        plugins: {
+            legend: {
+                position: 'top',
+            },
+            tooltip: {
+                callbacks: {
+                    label: function(context) {
+                        return context.dataset.label + ': KSh ' + context.raw.toFixed(2);
+                    }
+                }
+            }
+        }
+    }
+});
+</script>
+
+<!-- Financial Tips -->
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="stat-card">
+            <h5><i class="fas fa-lightbulb"></i> Financial Insights</h5>
+            <hr>
+            <ul class="mb-0">
+                <li><strong>Pending Revenue:</strong> KSh {{ pending_revenue|floatformat:0 }} is waiting to be collected from customers</li>
+                {% if total_profit < 0 %}
+                <li class="text-danger"><strong>Warning:</strong> Your expenses exceed revenue. Consider reducing costs or increasing prices.</li>
+                {% elif total_profit < 10000 %}
+                <li class="text-warning"><strong>Note:</strong> Your profit margin is low. Look for ways to increase efficiency.</li>
+                {% else %}
+                <li class="text-success"><strong>Great!</strong> Your business is profitable. Keep up the good work!</li>
+                {% endif %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
