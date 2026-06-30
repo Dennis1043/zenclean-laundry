@@ -1,0 +1,272 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZenClean Laundry - Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    {% load static %}
+    <style>
+        :root {
+            --primary-blue: #1a5276;
+            --secondary-blue: #2e86c1;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a5276 0%, #2e86c1 50%, #85c1e9 100%);
+            padding: 20px;
+        }
+        
+        .login-container {
+            width: 100%;
+            max-width: 420px;
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            animation: slideUp 0.6s ease;
+        }
+        
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(40px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .login-header {
+            background: linear-gradient(135deg, #1a5276 0%, #2e86c1 100%);
+            padding: 40px 30px;
+            text-align: center;
+            color: white;
+        }
+        
+        .login-header .logo-img {
+            max-width: 80px;
+            margin-bottom: 10px;
+        }
+        
+        .login-header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            margin: 0;
+        }
+        
+        .login-header .tagline {
+            opacity: 0.8;
+            font-size: 12px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin: 5px 0 0;
+        }
+        
+        .login-body {
+            padding: 35px 30px 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #1a5276;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .form-group .input-group {
+            position: relative;
+        }
+        
+        .form-group .input-group i {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #7f8c8d;
+            z-index: 10;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 12px 15px 12px 45px;
+            border: 2px solid #e9ecef;
+            border-radius: 12px;
+            font-size: 14px;
+            transition: all 0.3s;
+            background: #f8f9fa;
+        }
+        
+        .form-control:focus {
+            border-color: #2e86c1;
+            box-shadow: 0 0 0 4px rgba(46, 134, 193, 0.15);
+            background: white;
+            outline: none;
+        }
+        
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #1a5276 0%, #2e86c1 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            letter-spacing: 1px;
+        }
+        
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(26, 82, 118, 0.4);
+        }
+        
+        .btn-login i {
+            margin-right: 8px;
+        }
+        
+        .login-link {
+            text-align: center;
+            padding: 10px 30px 5px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        
+        .login-link a {
+            color: #2e86c1;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        
+        .login-link a:hover {
+            text-decoration: underline;
+        }
+        
+        .login-footer {
+            text-align: center;
+            padding: 15px 30px 25px;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        .login-footer p {
+            font-size: 13px;
+            color: #7f8c8d;
+            margin: 0;
+        }
+        
+        .login-footer .brand {
+            color: #2e86c1;
+            font-weight: 600;
+        }
+        
+        .alert {
+            border-radius: 12px;
+            font-size: 14px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-danger {
+            background: #fde8e8;
+            border: 1px solid #f8d7da;
+            color: #721c24;
+        }
+        
+        .alert-danger i {
+            margin-right: 8px;
+        }
+        
+        @media (max-width: 480px) {
+            .login-body { padding: 25px 20px; }
+            .login-header { padding: 30px 20px; }
+            .login-header h1 { font-size: 24px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <!-- Header -->
+        <div class="login-header">
+            <div>
+                <img src="{% static 'img/zenclean_logo.png' %}" alt="ZenClean Laundry" class="logo-img">
+            </div>
+            <h1>ZenClean</h1>
+            <div class="tagline">GREAT WASH, GREAT VIBES</div>
+        </div>
+        
+        <!-- Body -->
+        <div class="login-body">
+            {% if form.errors %}
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i>
+                Invalid username or password. Please try again.
+            </div>
+            {% endif %}
+            
+            {% if next %}
+                {% if user.is_authenticated %}
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Your account doesn't have access to this page.
+                </div>
+                {% endif %}
+            {% endif %}
+            
+            <form method="post" action="{% url 'login' %}">
+                {% csrf_token %}
+                
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <div class="input-group">
+                        <i class="fas fa-user"></i>
+                        <input type="text" name="username" id="username" class="form-control" 
+                               placeholder="Enter your username" required autofocus>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="input-group">
+                        <i class="fas fa-lock"></i>
+                        <input type="password" name="password" id="password" class="form-control" 
+                               placeholder="Enter your password" required>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn-login">
+                    <i class="fas fa-sign-in-alt"></i> Sign In
+                </button>
+                
+                <input type="hidden" name="next" value="{{ next }}">
+            </form>
+        </div>
+        
+        <!-- Registration Link -->
+        <div class="login-link">
+            Don't have an account? <a href="{% url 'register' %}">Register</a>
+        </div>
+        
+        <!-- Footer -->
+        <div class="login-footer">
+            <p>&copy; 2026 <span class="brand">ZenClean</span> Laundry. All rights reserved.</p>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

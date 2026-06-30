@@ -1,0 +1,311 @@
+{% extends 'base/base.html' %}
+{% block title %}Smart Transaction Entry{% endblock %}
+{% block page_title %}Smart Transaction Entry{% endblock %}
+
+{% block extra_css %}
+<style>
+    .analyzer-card {
+        background: white;
+        border-radius: 20px;
+        padding: 25px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        margin-bottom: 20px;
+    }
+    .result-card {
+        border-left: 4px solid #4361ee;
+        padding: 15px 20px;
+        background: #f8f9fa;
+        border-radius: 12px;
+        margin-top: 15px;
+    }
+    .confidence-high { color: #27ae60; font-weight: bold; }
+    .confidence-medium { color: #f39c12; font-weight: bold; }
+    .confidence-low { color: #e74c3c; font-weight: bold; }
+    .suggestion-item {
+        padding: 12px 15px;
+        background: white;
+        border-radius: 10px;
+        margin-bottom: 10px;
+        border: 1px solid #eee;
+    }
+    .btn-accounting {
+        background: #6c5ce7;
+        color: white;
+        border: none;
+        padding: 8px 20px;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    .btn-accounting:hover {
+        background: #5a4bd1;
+        transform: translateY(-2px);
+    }
+    .entry-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+    }
+    .entry-table th {
+        background: #2c3e50;
+        color: white;
+        padding: 8px 12px;
+        text-align: left;
+    }
+    .entry-table td {
+        padding: 8px 12px;
+        border-bottom: 1px solid #eee;
+    }
+    .entry-table .debit { color: #27ae60; }
+    .entry-table .credit { color: #e74c3c; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="analyzer-card">
+            <h5><i class="fas fa-magic"></i> Smart Transaction Entry</h5>
+            <p class="text-muted">Describe your transaction naturally. The system will analyze and determine where it belongs.</p>
+            
+            <form id="transactionForm">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">Transaction Description *</label>
+                    <input type="text" id="description" name="description" class="form-control" 
+                           placeholder="e.g., Purchased a new washing machine for KSh 150,000" required>
+                    <small class="text-muted">Describe what happened naturally</small>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Amount (KSh) *</label>
+                            <input type="number" id="amount" name="amount" class="form-control" step="0.01" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Transaction Type</label>
+                            <select id="transaction_type" name="transaction_type" class="form-control">
+                                <option value="purchase">Purchase</option>
+                                <option value="sale">Sale</option>
+                                <option value="expense">Expense</option>
+                                <option value="payment">Payment</option>
+                                <option value="receipt">Receipt</option>
+                                <option value="adjustment">Adjustment</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-custom">
+                    <i class="fas fa-robot"></i> Analyze Transaction
+                </button>
+            </form>
+        </div>
+        
+        <!-- Results Container -->
+        <div id="resultContainer" style="display: none;">
+            <div class="analyzer-card" id="resultCard">
+                <h5><i class="fas fa-check-circle" style="color: #27ae60;"></i> Analysis Result</h5>
+                <div id="resultContent"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.getElementById('transactionForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        var formData = new FormData(this);
+        
+        fetch('/smart-transaction/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            var container = document.getElementById('resultContainer');
+            var content = document.getElementById('resultContent');
+            container.style.display = 'block';
+            
+            var result = data.result;
+            var confidenceClass = result.confidence_score > 0.7 ? 'confidence-high' : 
+                                  (result.confidence_score > 0.5 ? 'confidence-medium' : 'confidence-low');
+            
+            // Build suggested entries table
+            var entriesHtml = '';
+            if (result.suggested_entries && result.suggested_entries.length > 0) {
+                entriesHtml = `
+                    <h6 class="mt-3">📊 Suggested Journal Entries:</h6>
+                    <table class="entry-table">
+                        <thead>
+                            <tr><th>Account</th><th>Debit</th><th>Credit</th></tr>
+                        </thead>
+                        <tbody>
+                            ${result.suggested_entries.map(function(entry) {
+                                return '<tr>' +
+                                    '<td>' + entry.account + '</td>' +
+                                    '<td class="debit">' + (entry.debit > 0 ? 'KSh ' + entry.debit.toFixed(2) : '-') + '</td>' +
+                                    '<td class="credit">' + (entry.credit > 0 ? 'KSh ' + entry.credit.toFixed(2) : '-') + '</td>' +
+                                '</tr>';
+                            }).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+            
+            // Build actions HTML
+            var actionsHtml = '';
+            if (data.requires_verification) {
+                actionsHtml = `
+                    <div class="mt-3">
+                        <button class="btn btn-success" onclick="confirmAndGoToAccounting(${data.transaction_id})">
+                            <i class="fas fa-check"></i> Confirm & Go to Accounting
+                        </button>
+                        <button class="btn btn-warning" onclick="editTransaction(${data.transaction_id})">
+                            <i class="fas fa-edit"></i> Edit
+                        </button>
+                    </div>
+                `;
+            } else {
+                actionsHtml = `
+                    <div class="mt-3">
+                        <button class="btn btn-primary" onclick="viewTransaction(${data.transaction_id})">
+                            <i class="fas fa-eye"></i> View Transaction
+                        </button>
+                        <button class="btn btn-accounting" onclick="goToAccounting()">
+                            <i class="fas fa-book"></i> Go to Accounting
+                        </button>
+                        <button class="btn btn-outline-primary" onclick="addMore()">
+                            <i class="fas fa-plus"></i> Add More
+                        </button>
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = `
+                <div class="result-card">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>📝 Description:</strong> ${result.description}</p>
+                            <p><strong>💰 Amount:</strong> <strong>KSh ${result.amount}</strong></p>
+                            <p><strong>📌 Transaction Type:</strong> ${result.transaction_type}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>📂 Detected Category:</strong> <span class="badge bg-info">${result.detected_category || 'N/A'}</span></p>
+                            <p><strong>📑 Subcategory:</strong> ${result.detected_subcategory || 'N/A'}</p>
+                            <p><strong>🏷️ Account Type:</strong> ${result.account_type || 'N/A'}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <p><strong>🎯 Confidence Score:</strong> 
+                                <span class="${confidenceClass}">${(result.confidence_score * 100).toFixed(0)}%</span>
+                            </p>
+                            <p><strong>💡 Reasoning:</strong> ${result.reasoning.join(', ')}</p>
+                        </div>
+                    </div>
+                    
+                    ${entriesHtml}
+                    
+                    ${result.suggested_actions && result.suggested_actions.length > 0 ? `
+                        <div class="mt-3">
+                            <h6>💡 Suggested Actions:</h6>
+                            ${result.suggested_actions.map(function(action) {
+                                return '<div class="suggestion-item">' +
+                                    '<i class="fas fa-lightbulb" style="color: #f39c12;"></i> ' +
+                                    action.message +
+                                '</div>';
+                            }).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+                
+                ${actionsHtml}
+            `;
+            
+            if (data.message) {
+                var msgClass = data.requires_verification ? 'warning' : 'success';
+                content.innerHTML = `
+                    <div class="alert alert-${msgClass}">
+                        <i class="fas fa-${data.requires_verification ? 'exclamation-triangle' : 'check-circle'}"></i> 
+                        ${data.message}
+                    </div>
+                ` + content.innerHTML;
+            }
+            
+            container.scrollIntoView({ behavior: 'smooth' });
+        })
+        .catch(error => {
+            showNotification('Error: ' + error, 'error');
+        });
+    });
+    
+    function confirmAndGoToAccounting(transactionId) {
+        fetch('/smart-transaction/confirm/' + transactionId + '/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(data.message, 'success');
+                window.location.href = '/accounting/';
+            } else {
+                showNotification(data.error, 'error');
+            }
+        });
+    }
+    
+    function goToAccounting() {
+        window.location.href = '/accounting/';
+    }
+    
+    function editTransaction(transactionId) {
+        window.location.href = '/smart-transaction/edit/' + transactionId + '/';
+    }
+    
+    function viewTransaction(transactionId) {
+        window.location.href = '/smart-transaction/view/' + transactionId + '/';
+    }
+    
+    function addMore() {
+        document.getElementById('resultContainer').style.display = 'none';
+        document.getElementById('transactionForm').reset();
+        document.getElementById('description').focus();
+    }
+    
+    function showNotification(message, type) {
+        var notification = document.createElement('div');
+        notification.textContent = message;
+        var bgColor = type === 'success' ? '#06d6a0' : '#ef476f';
+        notification.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 20px;background:' + bgColor + ';color:white;border-radius:10px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+        document.body.appendChild(notification);
+        setTimeout(function() { notification.remove(); }, 3000);
+    }
+    
+    function getCookie(name) {
+        var value = null;
+        if (document.cookie && document.cookie !== '') {
+            var cookies = document.cookie.split(';');
+            for (var i = 0; i < cookies.length; i++) {
+                var cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    value = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return value;
+    }
+</script>
+{% endblock %}

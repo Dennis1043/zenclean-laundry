@@ -1,0 +1,2312 @@
+﻿from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib import messages
+from django.db.models import Sum, Count, Q
+from datetime import datetime, timedelta
+from django.utils import timezone
+from decimal import Decimal
+import json
+from django.http import JsonResponse, HttpResponse
+import urllib.parse
+import csv
+import io
+from io import BytesIO
+from django.conf import settings
+
+from .models import (
+    Order, Customer, Expense, Journal, LedgerAccount, JournalEntry, 
+    Asset, Liability, Equity, Transaction, UserProfile
+)
+from .forms import OrderForm, CustomerForm, ExpenseForm
+from .transaction_analyzer import TransactionAnalyzer
+from .accounting_generator import AccountingEntryGenerator
+from django.contrib.auth.models import User
+
+# ReportLab imports
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+
+# OpenPyXL imports
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+
+# ============================================================
+# DECORATORS - FIXED VERSION
+# ============================================================
+def manager_required(view_func):
+    """Decorator for views that only Manager/Owner can access"""
+    @login_required
+    def wrapper(request, *args, **kwargs):
+        # DEBUG: Print user info to terminal
+        print(f"=== manager_required check for: {request.user.username} ===")
+        
+        # Check if user is superuser first (superusers bypass all checks)
+        if request.user.is_superuser:
+            print("✅ Superuser - access granted")
+            return view_func(request, *args, **kwargs)
+        
+        try:
+            profile = request.user.profile
+            print(f"Profile role: {profile.role}")
+            print(f"Is manager: {profile.is_manager}")
+            
+            if profile.is_manager:
+                print("✅ Manager - access granted")
+                return view_func(request, *args, **kwargs)
+            else:
+                print("❌ User is not a manager")
+        except UserProfile.DoesNotExist:
+            print("❌ No profile found for user")
+        except Exception as e:
+            print(f"❌ Error checking profile: {e}")
+        
+        messages.error(request, 'Only Manager can access this page.')
+        return redirect('dashboard')
+    return wrapper
+
+
+def staff_required(view_func):
+    """Decorator for views that Staff can access (Dashboard, Orders, Customers)"""
+    @login_required
+    def wrapper(request, *args, **kwargs):
+        # Superusers bypass all checks
+        if request.user.is_superuser:
+            return view_func(request, *args, **kwargs)
+        
+        try:
+            profile = request.user.profile
+            if profile.is_manager or profile.is_staff:
+                return view_func(request, *args, **kwargs)
+        except:
+            pass
+        messages.error(request, 'You do not have permission to access this page.')
+        return redirect('dashboard')
+    return wrapper
+
+
+# ============================================================
+# AUTHENTICATION
+# ============================================================
+def user_login(request):
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        user = authenticate(request, username=username, password=password)
+        if user is not None:
+            login(request, user)
+            next_url = request.GET.get('next', '/')
+            return redirect(next_url)
+        else:
+            messages.error(request, 'Invalid username or password')
+    return render(request, 'laundry/login.html')
+
+
+def logout_view(request):
+    logout(request)
+    return redirect('/login/')
+
+
+# ============================================================
+# USER MANAGEMENT - Manager only
+# ============================================================
+@manager_required
+def user_management(request):
+    """Manage users and their roles - Manager only"""
+    users = User.objects.all().select_related('profile')
+    
+    if request.method == 'POST':
+        user_id = request.POST.get('user_id')
+        role = request.POST.get('role')
+        
+        try:
+            profile = UserProfile.objects.get(user_id=user_id)
+            profile.role = role
+            profile.is_manager = (role == 'manager')
+            profile.is_staff = (role == 'staff' or role == 'manager')
+            profile.save()
+            messages.success(request, f'User {profile.user.username} updated successfully!')
+        except UserProfile.DoesNotExist:
+            messages.error(request, 'User profile not found!')
+        
+        return redirect('user_management')
+    
+    context = {
+        'users': users,
+    }
+    return render(request, 'laundry/user_management.html', context)
+
+
+@manager_required
+def create_user(request):
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email = request.POST.get('email')
+        password = request.POST.get('password')
+        role = request.POST.get('role', 'staff')
+        
+        if User.objects.filter(username=username).exists():
+            messages.error(request, 'Username already exists!')
+            return redirect('user_management')
+        
+        user = User.objects.create_user(
+            username=username,
+            email=email,
+            password=password
+        )
+        
+        # Create profile with role
+        UserProfile.objects.create(
+            user=user,
+            role=role,
+            is_manager=(role == 'manager'),
+            is_staff=(role == 'staff' or role == 'manager'),
+            phone=request.POST.get('phone', '')
+        )
+        
+        messages.success(request, f'User {username} created successfully!')
+        return redirect('user_management')
+    return redirect('user_management')
+
+
+# ============================================================
+# DASHBOARD - Staff and Manager
+# ============================================================
+@login_required(login_url='/login/')
+def dashboard(request):
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db.models import Sum
+    from .models import UserProfile
+    
+    # Ensure user has a profile
+    profile, created = UserProfile.objects.get_or_create(
+        user=request.user,
+        defaults={
+            'role': 'manager' if request.user.is_superuser else 'staff',
+            'is_manager': request.user.is_superuser,
+            'is_staff': True,
+            'phone': ''
+        }
+    )
+    
+    today = timezone.now().date()
+    week_ago = today - timedelta(days=7)
+    # Get totals from accounting system
+    try:
+        revenue_account = LedgerAccount.objects.get(code='4000')
+        total_revenue = JournalEntry.objects.filter(
+            account=revenue_account
+        ).aggregate(Sum('credit'))['credit__sum'] or 0
+    except:
+        total_revenue = Order.objects.filter(payment_status='paid').aggregate(
+            Sum('total_amount')
+        )['total_amount__sum'] or 0
+    
+    expense_accounts = LedgerAccount.objects.filter(account_type='expense')
+    if expense_accounts:
+        total_expenses = JournalEntry.objects.filter(
+            account__in=expense_accounts
+        ).aggregate(Sum('debit'))['debit__sum'] or 0
+    else:
+        total_expenses = Expense.objects.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    # Today's stats
+    today_orders = Order.objects.filter(created_at__date=today)
+    today_revenue = today_orders.filter(payment_status='paid').aggregate(
+        Sum('total_amount')
+    )['total_amount__sum'] or 0
+    today_expenses = Expense.objects.filter(date=today).aggregate(
+        Sum('amount')
+    )['amount__sum'] or 0
+    
+    # Total Assets
+    total_assets = 0
+    for acc in LedgerAccount.objects.filter(account_type='asset'):
+        total_assets += acc.current_balance
+    
+    # Pending Revenue
+    pending_revenue = Order.objects.filter(
+        payment_status__in=['unpaid', 'partial']
+    ).aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    
+    # Status counts
+    received_orders = Order.objects.filter(status='received').count()
+    washing_orders = Order.objects.filter(status='washing').count()
+    drying_orders = Order.objects.filter(status='drying').count()
+    folding_orders = Order.objects.filter(status='folding').count()
+    progress_orders = washing_orders + drying_orders + folding_orders
+    ready_orders = Order.objects.filter(status='ready').count()
+    completed_orders = Order.objects.filter(status='completed').count()
+    
+    # Payment counts
+    paid_count = Order.objects.filter(payment_status='paid').count()
+    unpaid_count = Order.objects.filter(payment_status='unpaid').count()
+    partial_count = Order.objects.filter(payment_status='partial').count()
+    
+    # Weekly data for chart
+    week_data = []
+    week_labels = []
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+        day_orders = Order.objects.filter(created_at__date=day, payment_status='paid')
+        revenue = day_orders.aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+        week_data.append(float(revenue))
+        week_labels.append(day.strftime('%a'))
+    
+    # Weekly percentage
+    last_week_start = week_ago - timedelta(days=7)
+    last_week_orders = Order.objects.filter(
+        created_at__date__gte=last_week_start,
+        created_at__date__lt=week_ago,
+        payment_status='paid'
+    )
+    last_week_revenue = last_week_orders.aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    if last_week_revenue > 0:
+        weekly_percentage = round((today_revenue - last_week_revenue) / last_week_revenue * 100)
+    else:
+        weekly_percentage = 100 if today_revenue > 0 else 0
+    
+    # New customers this month
+    month_ago = today - timedelta(days=30)
+    new_customers = Customer.objects.filter(created_at__date__gte=month_ago).count()
+    
+    # Completion rate
+    total_orders = Order.objects.count()
+    if total_orders > 0:
+        completion_rate = round((completed_orders / total_orders) * 100)
+    else:
+        completion_rate = 0
+    
+    # Ready orders list
+    ready_orders_list = Order.objects.filter(status='ready').order_by('-created_at')[:10]
+    recent_orders = Order.objects.all().order_by('-created_at')[:10]
+    total_customers = Customer.objects.count()
+    pending_orders_count = unpaid_count + partial_count
+    weekly_orders = Order.objects.filter(created_at__date__gte=week_ago).count()
+    
+    # Greeting
+    hour = timezone.now().hour
+    if hour < 12:
+        greeting = "morning"
+    elif hour < 17:
+        greeting = "afternoon"
+    else:
+        greeting = "evening"
+    
+    context = {
+        'greeting': greeting,
+        'total_orders': total_orders,
+        'total_revenue': total_revenue,
+        'total_expenses': total_expenses,
+        'total_assets': total_assets,
+        'today_orders': today_orders.count(),
+        'today_revenue': today_revenue,
+        'today_expenses': today_expenses,
+        'today_profit': today_revenue - today_expenses,
+        'pending_revenue': pending_revenue,
+        'pending_orders_count': pending_orders_count,
+        'received_orders': received_orders,
+        'progress_orders': progress_orders,
+        'ready_orders': ready_orders,
+        'completed_orders': completed_orders,
+        'paid_count': paid_count,
+        'unpaid_count': unpaid_count,
+        'partial_count': partial_count,
+        'total_customers': total_customers,
+        'new_customers': new_customers,
+        'weekly_orders': weekly_orders,
+        'weekly_percentage': weekly_percentage,
+        'completion_rate': completion_rate,
+        'week_data': week_data,
+        'week_labels': week_labels,
+        'ready_orders_list': ready_orders_list,
+        'recent_orders': recent_orders,
+    }
+    return render(request, 'laundry/dashboard.html', context)
+
+
+
+@staff_required
+def order_list(request):
+    orders = Order.objects.all().order_by('-created_at')
+    return render(request, 'laundry/orders.html', {'orders': orders})
+
+
+@staff_required
+def order_create(request):
+    if request.method == 'POST':
+        phone = request.POST.get('customer_phone')
+        name = request.POST.get('customer_name')
+        location = request.POST.get('customer_location', '')
+        apartment_name = request.POST.get('customer_apartment', '')
+        floor = request.POST.get('customer_floor', '')
+        door_number = request.POST.get('customer_door', '')
+        existing_customer_id = request.POST.get('existing_customer_id')
+        
+        if existing_customer_id:
+            customer = get_object_or_404(Customer, id=existing_customer_id)
+        else:
+            customer = Customer.objects.create(
+                name=name,
+                phone=phone,
+                location=location,
+                apartment_name=apartment_name,
+                floor=floor,
+                door_number=door_number
+            )
+        
+        try:
+            weight_kg = float(request.POST.get('weight_kg', 0))
+            price_per_kg = float(request.POST.get('price_per_kg', 100))
+            paid_amount = float(request.POST.get('paid_amount', 0))
+        except ValueError:
+            weight_kg = 0
+            price_per_kg = 100
+            paid_amount = 0
+        
+        order = Order(
+            customer=customer,
+            items_description=request.POST.get('items_description', ''),
+            weight_kg=weight_kg,
+            price_per_kg=price_per_kg,
+            status=request.POST.get('status', 'received'),
+            payment_status=request.POST.get('payment_status', 'unpaid'),
+            paid_amount=paid_amount,
+            notes=request.POST.get('notes', ''),
+            created_by=request.user
+        )
+        order.save()
+        return redirect('order_list')
+    
+    return render(request, 'laundry/order_form.html', {'title': 'New Order'})
+
+
+@staff_required
+def order_edit(request, pk):
+    order = get_object_or_404(Order, pk=pk)
+    if request.method == 'POST':
+        form = OrderForm(request.POST, instance=order)
+        if form.is_valid():
+            form.save()
+            return redirect('order_list')
+    else:
+        form = OrderForm(instance=order)
+    return render(request, 'laundry/order_form.html', {'form': form, 'title': 'Edit Order'})
+
+
+@staff_required
+def update_order_status(request, order_id, status):
+    if request.method == 'POST':
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            order.status = status
+            order.save()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+    return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
+
+
+@staff_required
+def update_order_payment(request, order_id, payment_status):
+    if request.method == 'POST':
+        try:
+            order = get_object_or_404(Order, id=order_id)
+            order.payment_status = payment_status
+            if payment_status == 'paid':
+                order.paid_amount = order.total_amount
+            order.save()
+            return JsonResponse({'success': True})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+    return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
+
+
+@staff_required
+def mark_all_ready_completed(request):
+    if request.method == 'POST':
+        try:
+            count = Order.objects.filter(status='ready').update(status='completed')
+            return JsonResponse({'success': True, 'message': f'{count} order(s) marked as completed!'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)}, status=500)
+    return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
+
+
+# ============================================================
+# CUSTOMERS - Staff and Manager
+# ============================================================
+@staff_required
+def customer_list(request):
+    customers = Customer.objects.all().order_by('-total_orders')
+    return render(request, 'laundry/customers.html', {'customers': customers})
+
+
+@staff_required
+def customer_create(request):
+    if request.method == 'POST':
+        form = CustomerForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('customer_list')
+    else:
+        form = CustomerForm()
+    return render(request, 'laundry/customer_form.html', {'form': form, 'title': 'New Customer'})
+
+
+@staff_required
+def customer_edit(request, pk):
+    customer = get_object_or_404(Customer, pk=pk)
+    if request.method == 'POST':
+        form = CustomerForm(request.POST, instance=customer)
+        if form.is_valid():
+            form.save()
+            return redirect('customer_list')
+    else:
+        form = CustomerForm(instance=customer)
+    return render(request, 'laundry/customer_form.html', {'form': form, 'title': 'Edit Customer'})
+
+
+@staff_required
+def find_customer_by_phone(request, phone):
+    try:
+        customers = Customer.objects.filter(phone=phone)
+        if customers.exists():
+            customer = customers.first()
+            return JsonResponse({
+                'exists': True,
+                'id': customer.id,
+                'name': customer.name,
+                'phone': customer.phone,
+                'location': customer.location or '',
+                'apartment_name': customer.apartment_name or '',
+                'floor': customer.floor or '',
+                'door_number': customer.door_number or ''
+            })
+        else:
+            return JsonResponse({'exists': False})
+    except Exception as e:
+        return JsonResponse({'exists': False, 'error': str(e)})
+
+
+# ============================================================
+# EXPENSES - Manager only
+# ============================================================
+@manager_required
+def expense_list(request):
+    expenses = Expense.objects.all().order_by('-date')
+    total_expenses = expenses.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    assets = Asset.objects.all().order_by('-created_at')
+    total_assets_value = assets.aggregate(Sum('current_value'))['current_value__sum'] or 0
+    total_depreciation = assets.aggregate(Sum('accumulated_depreciation'))['accumulated_depreciation__sum'] or 0
+    assets_count = assets.count()
+    category_choices = Expense.CATEGORY_CHOICES
+    
+    context = {
+        'expenses': expenses,
+        'total_expenses': total_expenses,
+        'expenses_count': expenses.count(),
+        'assets': assets,
+        'assets_count': assets_count,
+        'total_assets_value': total_assets_value,
+        'total_depreciation': total_depreciation,
+        'category_choices': category_choices,
+    }
+    return render(request, 'laundry/expenses.html', context)
+
+
+@manager_required
+def expense_create(request):
+    if request.method == 'POST':
+        description = request.POST.get('description')
+        category = request.POST.get('category')
+        amount = request.POST.get('amount')
+        notes = request.POST.get('notes', '')
+        entry_type = request.POST.get('entry_type', 'expense')
+        
+        if not description or not amount:
+            return redirect('expense_list')
+        
+        try:
+            if entry_type == 'asset':
+                category = 'asset_purchase'
+            
+            expense = Expense.objects.create(
+                description=description,
+                category=category or 'other',
+                amount=int(amount),
+                notes=notes,
+                created_by=request.user
+            )
+            return redirect('expense_list')
+        except Exception as e:
+            return redirect('expense_list')
+    
+    return render(request, 'laundry/expense_form.html', {'title': 'Add Expense'})
+
+
+@manager_required
+def expense_edit(request, pk):
+    expense = get_object_or_404(Expense, pk=pk)
+    
+    if request.method == 'POST':
+        description = request.POST.get('description')
+        category = request.POST.get('category')
+        amount = request.POST.get('amount')
+        notes = request.POST.get('notes', '')
+        entry_type = request.POST.get('entry_type', 'expense')
+        
+        if not description or not amount:
+            return redirect('expense_list')
+        
+        try:
+            if entry_type == 'asset':
+                category = 'asset_purchase'
+            
+            expense.description = description
+            expense.category = category or 'other'
+            expense.amount = int(amount)
+            expense.notes = notes
+            expense.save()
+            return redirect('expense_list')
+        except Exception as e:
+            return redirect('expense_list')
+    
+    return render(request, 'laundry/expense_form.html', {
+        'expense': expense,
+        'title': 'Edit Expense',
+        'is_edit': True
+    })
+
+
+@manager_required
+def expense_delete(request, pk):
+    if request.method == 'POST':
+        try:
+            expense = get_object_or_404(Expense, pk=pk)
+            expense.delete()
+            return JsonResponse({'success': True, 'message': 'Expense deleted successfully!'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request'})
+
+
+# ============================================================
+# REPORTS - Manager only
+# ============================================================
+@manager_required
+def reports(request):
+    today = timezone.now().date()
+    week_ago = today - timedelta(days=7)
+    month_ago = today - timedelta(days=30)
+    
+    total_orders_count = Order.objects.count()
+    total_revenue = Order.objects.filter(payment_status='paid').aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    total_expenses = Expense.objects.aggregate(Sum('amount'))['amount__sum'] or 0
+    total_customers = Customer.objects.count()
+    net_profit = total_revenue - total_expenses
+    
+    weekly_revenue = Order.objects.filter(created_at__date__gte=week_ago, payment_status='paid').aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    monthly_revenue = Order.objects.filter(created_at__date__gte=month_ago, payment_status='paid').aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    
+    daily_data = []
+    for i in range(6, -1, -1):
+        day = today - timedelta(days=i)
+        revenue = Order.objects.filter(created_at__date=day, payment_status='paid').aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+        expenses = Expense.objects.filter(date=day).aggregate(Sum('amount'))['amount__sum'] or 0
+        daily_data.append({
+            'date': day.strftime('%Y-%m-%d'),
+            'revenue': float(revenue),
+            'expenses': float(expenses),
+            'profit': float(revenue - expenses)
+        })
+    
+    context = {
+        'total_orders': total_orders_count,
+        'total_revenue': total_revenue,
+        'total_expenses': total_expenses,
+        'total_profit': net_profit,
+        'total_customers': total_customers,
+        'weekly_revenue': weekly_revenue,
+        'monthly_revenue': monthly_revenue,
+        'daily_data': daily_data,
+    }
+    return render(request, 'laundry/reports.html', context)
+
+
+# ============================================================
+# RECEIPTS - Staff and Manager
+# ============================================================
+@staff_required
+def receipt(request, order_id):
+    order = get_object_or_404(Order, id=order_id)
+    return render(request, 'laundry/receipt.html', {'order': order})
+
+
+@staff_required
+def receipt_data(request, order_id):
+    order = get_object_or_404(Order, id=order_id)
+    data = {
+        'success': True,
+        'order_number': order.order_number,
+        'date': order.created_at.strftime('%Y-%m-%d %H:%M'),
+        'customer_name': order.customer.name,
+        'customer_phone': order.customer.phone,
+        'customer_location': order.customer.location or '',
+        'weight_kg': order.weight_kg,
+        'price_per_kg': order.price_per_kg,
+        'total_amount': order.total_amount,
+        'paid_amount': order.paid_amount,
+        'balance': order.remaining_balance,
+        'status': order.get_status_display(),
+    }
+    return JsonResponse(data)
+
+
+@staff_required
+def receipt_pdf(request, order_id):
+    order = get_object_or_404(Order, id=order_id)
+    from .pdf_generator import generate_pdf_receipt
+    
+    pdf_buffer = generate_pdf_receipt(order)
+    
+    response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="receipt_{order.order_number}.pdf"'
+    return response
+
+
+@staff_required
+def receipt_whatsapp(request, order_id):
+    order = get_object_or_404(Order, id=order_id)
+    
+    phone = order.customer.phone.replace(' ', '').replace('-', '')
+    if phone.startswith('0'):
+        phone = '254' + phone[1:]
+    if not phone.startswith('254'):
+        phone = '254' + phone
+    
+    message = f"""ZENCLEAN LAUNDRY - RECEIPT
+
+Order #: {order.order_number}
+Date: {order.created_at.strftime('%Y-%m-%d %H:%M')}
+
+CUSTOMER DETAILS:
+Name: {order.customer.name}
+Phone: {order.customer.phone}
+Location: {order.customer.location or 'N/A'}
+
+ORDER DETAILS:
+Items: {order.items_description or 'N/A'}
+Weight: {order.weight_kg} kg
+Rate: KSh {order.price_per_kg}/kg
+
+PAYMENT SUMMARY:
+Total: KSh {order.total_amount:,}
+Paid: KSh {order.paid_amount:,}"""
+    
+    if order.remaining_balance > 0:
+        message += f"\nBalance: KSh {order.remaining_balance:,}"
+    else:
+        message += "\nFully Paid"
+    
+    message += f"""
+
+Status: {order.get_status_display()}
+
+Thank you for choosing ZenClean!
+Ready in 24 hours
+
+ZenClean Laundry
+0729116844
+Kasarani, Nairobi"""
+    
+    encoded_message = urllib.parse.quote(message)
+    whatsapp_url = f"https://wa.me/{phone}?text={encoded_message}"
+    
+    return JsonResponse({
+        'success': True,
+        'whatsapp_url': whatsapp_url,
+        'phone': phone,
+        'message': message
+    })
+
+
+# ============================================================
+# ACCOUNTING - Manager only
+# ============================================================
+@manager_required
+def accounting_dashboard(request):
+    from django.db.models import Sum
+    from .models import LedgerAccount, JournalEntry, Journal, Asset, Liability, Equity, Order, Expense
+    
+    # Revenue from PAID orders
+    paid_orders = Order.objects.filter(payment_status='paid')
+    total_revenue = paid_orders.aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    
+    # Expenses from Expense model
+    total_expenses = Expense.objects.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    # Assets from Asset model
+    assets_list = Asset.objects.all().order_by('asset_code')
+    total_assets = assets_list.aggregate(Sum('current_value'))['current_value__sum'] or 0
+    
+    # Liabilities from Liability model
+    liabilities_list = Liability.objects.all().order_by('liability_code')
+    total_liabilities = liabilities_list.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    # Equity from Equity model
+    equity_list = Equity.objects.all().order_by('equity_code')
+    total_equity = equity_list.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    net_profit = total_revenue - total_expenses
+    
+    # Get journals with entries
+    journals = Journal.objects.filter(entries__isnull=False).distinct().order_by('-created_at')[:50]
+    
+    # Get all accounts that have journal entries
+    accounts_with_entries = []
+    all_accounts = LedgerAccount.objects.filter(is_active=True).order_by('code')
+    
+    for account in all_accounts:
+        has_entries = JournalEntry.objects.filter(account=account).exists()
+        if has_entries:
+            accounts_with_entries.append(account)
+    
+    # Add Fixed Assets account if there are assets
+    if total_assets > 0:
+        try:
+            fixed_account, _ = LedgerAccount.objects.get_or_create(
+                code='1400',
+                defaults={
+                    'name': 'Fixed Assets',
+                    'account_type': 'asset',
+                    'normal_balance': 'D',
+                    'opening_balance': 0,
+                    'current_balance': 0,
+                    'is_active': True
+                }
+            )
+            fixed_account.current_balance = total_assets
+            fixed_account.save()
+            if fixed_account not in accounts_with_entries:
+                accounts_with_entries.append(fixed_account)
+        except:
+            pass
+    
+    # Add Revenue account
+    try:
+        rev_account, _ = LedgerAccount.objects.get_or_create(
+            code='4000',
+            defaults={
+                'name': 'Laundry Service Revenue',
+                'account_type': 'revenue',
+                'normal_balance': 'C',
+                'opening_balance': 0,
+                'current_balance': 0,
+                'is_active': True
+            }
+        )
+        rev_account.current_balance = total_revenue
+        rev_account.save()
+        if rev_account not in accounts_with_entries:
+            accounts_with_entries.append(rev_account)
+    except:
+        pass
+    
+    # Add Expense account
+    try:
+        exp_account, _ = LedgerAccount.objects.get_or_create(
+            code='5900',
+            defaults={
+                'name': 'Total Expenses',
+                'account_type': 'expense',
+                'normal_balance': 'D',
+                'opening_balance': 0,
+                'current_balance': 0,
+                'is_active': True
+            }
+        )
+        exp_account.current_balance = total_expenses
+        exp_account.save()
+        if exp_account not in accounts_with_entries:
+            accounts_with_entries.append(exp_account)
+    except:
+        pass
+    
+    # Prepare T-account data
+    t_account_data = []
+    for account in accounts_with_entries:
+        entries = JournalEntry.objects.filter(account=account).order_by('-created_at')
+        debit_entries = entries.filter(debit__gt=0)[:20]
+        credit_entries = entries.filter(credit__gt=0)[:20]
+        total_debit = entries.aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = entries.aggregate(Sum('credit'))['credit__sum'] or 0
+        
+        if account.normal_balance == 'D':
+            balance = account.opening_balance + total_debit - total_credit
+        else:
+            balance = account.opening_balance + total_credit - total_debit
+        
+        t_account_data.append({
+            'account': account,
+            'debit_entries': debit_entries,
+            'credit_entries': credit_entries,
+            'total_debit': total_debit,
+            'total_credit': total_credit,
+        })
+    
+    # Trial Balance
+    trial_balance = []
+    total_tb_debits = 0
+    total_tb_credits = 0
+    
+    for account in accounts_with_entries:
+        total_debit = JournalEntry.objects.filter(account=account).aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = JournalEntry.objects.filter(account=account).aggregate(Sum('credit'))['credit__sum'] or 0
+        
+        if account.normal_balance == 'D':
+            balance = account.opening_balance + total_debit - total_credit
+        else:
+            balance = account.opening_balance + total_credit - total_debit
+        
+        if balance != 0:
+            if account.normal_balance == 'D':
+                if balance > 0:
+                    trial_balance.append({'account': account, 'debit': balance, 'credit': 0})
+                    total_tb_debits += balance
+                else:
+                    trial_balance.append({'account': account, 'debit': 0, 'credit': abs(balance)})
+                    total_tb_credits += abs(balance)
+            else:
+                if balance > 0:
+                    trial_balance.append({'account': account, 'debit': 0, 'credit': balance})
+                    total_tb_credits += balance
+                else:
+                    trial_balance.append({'account': account, 'debit': abs(balance), 'credit': 0})
+                    total_tb_debits += abs(balance)
+    
+    # Categorize accounts for display
+    asset_accounts = [a for a in accounts_with_entries if a.account_type == 'asset']
+    liability_accounts = [a for a in accounts_with_entries if a.account_type == 'liability']
+    equity_accounts = [a for a in accounts_with_entries if a.account_type == 'equity']
+    revenue_accounts = [a for a in accounts_with_entries if a.account_type == 'revenue']
+    expense_accounts = [a for a in accounts_with_entries if a.account_type == 'expense']
+    
+    context = {
+        'total_assets': total_assets,
+        'total_liabilities': total_liabilities,
+        'total_equity': total_equity,
+        'total_revenue': total_revenue,
+        'total_expenses': total_expenses,
+        'net_profit': net_profit,
+        'journals': journals,
+        'asset_accounts': asset_accounts,
+        'liability_accounts': liability_accounts,
+        'equity_accounts': equity_accounts,
+        'revenue_accounts': revenue_accounts,
+        'expense_accounts': expense_accounts,
+        'assets_list': assets_list,
+        'liabilities_list': liabilities_list,
+        'equity_list': equity_list,
+        't_accounts': t_account_data,
+        'trial_balance': trial_balance,
+        'total_tb_debits': total_tb_debits,
+        'total_tb_credits': total_tb_credits,
+        'total_revenue_amount': total_revenue,
+        'total_expense_amount': total_expenses,
+        'net_income': net_profit,
+    }
+    
+    return render(request, 'laundry/accounting_full.html', context)
+
+
+# ============================================================
+# ASSET MANAGEMENT - Manager only
+# ============================================================
+@manager_required
+def asset_list(request):
+    assets = Asset.objects.all().order_by('-created_at')
+    total_assets_value = assets.aggregate(Sum('current_value'))['current_value__sum'] or 0
+    
+    context = {
+        'assets': assets,
+        'total_assets_value': total_assets_value,
+        'assets_count': assets.count(),
+    }
+    return render(request, 'laundry/assets.html', context)
+
+
+@manager_required
+def asset_create(request):
+    if request.method == 'POST':
+        try:
+            asset = Asset.objects.create(
+                asset_code=request.POST.get('asset_code'),
+                name=request.POST.get('name'),
+                asset_type=request.POST.get('asset_type'),
+                purchase_date=request.POST.get('purchase_date'),
+                purchase_price=request.POST.get('purchase_price'),
+                current_value=request.POST.get('current_value'),
+                location=request.POST.get('location', ''),
+                description=request.POST.get('description', '')
+            )
+            return JsonResponse({'success': True, 'message': 'Asset added successfully!'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return render(request, 'laundry/asset_form.html')
+
+
+@manager_required
+def asset_edit(request, pk):
+    asset = get_object_or_404(Asset, pk=pk)
+    if request.method == 'POST':
+        try:
+            asset.asset_code = request.POST.get('asset_code')
+            asset.name = request.POST.get('name')
+            asset.asset_type = request.POST.get('asset_type')
+            asset.purchase_date = request.POST.get('purchase_date')
+            asset.purchase_price = request.POST.get('purchase_price')
+            asset.current_value = request.POST.get('current_value')
+            asset.location = request.POST.get('location', '')
+            asset.description = request.POST.get('description', '')
+            asset.save()
+            return JsonResponse({'success': True, 'message': 'Asset updated successfully!'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    
+    return render(request, 'laundry/asset_form.html', {'asset': asset})
+
+
+@manager_required
+def asset_delete(request, pk):
+    if request.method == 'POST':
+        try:
+            asset = get_object_or_404(Asset, pk=pk)
+            asset.delete()
+            return JsonResponse({'success': True, 'message': 'Asset deleted successfully!'})
+        except Exception as e:
+            return JsonResponse({'success': False, 'error': str(e)})
+    return JsonResponse({'success': False, 'error': 'Invalid request'})
+
+
+# ============================================================
+# SMART TRANSACTION - Manager only
+# ============================================================
+@manager_required
+def smart_transaction(request):
+    if request.method == 'POST':
+        description = request.POST.get('description')
+        amount = request.POST.get('amount')
+        transaction_type = request.POST.get('transaction_type', 'purchase')
+        
+        analyzer = TransactionAnalyzer()
+        result = analyzer.analyze(description, Decimal(amount), transaction_type)
+        
+        transaction = Transaction.objects.create(
+            description=description,
+            amount=amount,
+            transaction_type=transaction_type,
+            detected_category=result['detected_category'],
+            confidence_score=result['confidence_score'],
+            created_by=request.user
+        )
+        
+        if result['confidence_score'] > 0.80:
+            generator = AccountingEntryGenerator(transaction)
+            journal = generator.generate()
+            
+            transaction.verified = True
+            transaction.verified_by = request.user
+            transaction.verified_at = timezone.now()
+            transaction.detected_account = _get_account_for_category(result['detected_category'])
+            transaction.related_journal = journal
+            transaction.save()
+            
+            return JsonResponse({
+                'success': True,
+                'message': '✅ Transaction recorded and accounting entries created!',
+                'transaction_id': transaction.id,
+                'journal_id': journal.id,
+                'result': result
+            })
+        else:
+            return JsonResponse({
+                'success': True,
+                'requires_verification': True,
+                'transaction_id': transaction.id,
+                'result': result,
+                'message': 'Please verify the transaction category before creating accounting entries.'
+            })
+    
+    return render(request, 'laundry/smart_transaction.html')
+
+
+@manager_required
+def confirm_transaction(request, transaction_id):
+    if request.method == 'POST':
+        try:
+            transaction = Transaction.objects.get(id=transaction_id)
+            transaction.verified = True
+            transaction.verified_by = request.user
+            transaction.verified_at = timezone.now()
+            transaction.detected_account = _get_account_for_category(transaction.detected_category)
+            
+            generator = AccountingEntryGenerator(transaction)
+            journal = generator.generate()
+            transaction.related_journal = journal
+            transaction.save()
+            
+            return JsonResponse({
+                'success': True, 
+                'message': 'Transaction confirmed and accounting entries created!',
+                'redirect_url': '/accounting/'
+            })
+        except Transaction.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'Transaction not found'}, status=404)
+    return JsonResponse({'success': False, 'error': 'Invalid request'}, status=400)
+
+
+@manager_required
+def view_transaction(request, transaction_id):
+    transaction = get_object_or_404(Transaction, id=transaction_id)
+    return render(request, 'laundry/transaction_detail.html', {'transaction': transaction})
+
+
+@manager_required
+def edit_transaction(request, transaction_id):
+    transaction = get_object_or_404(Transaction, id=transaction_id)
+    if request.method == 'POST':
+        transaction.description = request.POST.get('description')
+        transaction.amount = request.POST.get('amount')
+        transaction.transaction_type = request.POST.get('transaction_type')
+        transaction.detected_category = request.POST.get('detected_category')
+        transaction.save()
+        return JsonResponse({'success': True, 'message': 'Transaction updated successfully!'})
+    
+    return render(request, 'laundry/transaction_edit.html', {'transaction': transaction})
+
+
+@manager_required
+def transaction_list(request):
+    transactions = Transaction.objects.all().order_by('-created_at')
+    context = {
+        'transactions': transactions,
+        'total_transactions': transactions.count(),
+        'total_amount': transactions.aggregate(Sum('amount'))['amount__sum'] or 0,
+    }
+    return render(request, 'laundry/transaction_list.html', context)
+
+
+# ============================================================
+# API ENDPOINTS
+# ============================================================
+@login_required
+def api_order_count(request):
+    pending_count = Order.objects.filter(status__in=['received', 'washing', 'drying', 'folding']).count()
+    return JsonResponse({'pending': pending_count})
+
+
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+def _get_account_for_category(category):
+    account_map = {
+        'asset': '1000',
+        'liability': '2000',
+        'revenue': '4000',
+        'expense': '5000',
+        'equity': '3000',
+    }
+    code = account_map.get(category, '5000')
+    try:
+        return LedgerAccount.objects.get(code=code)
+    except LedgerAccount.DoesNotExist:
+        return None
+    
+
+from django.contrib.auth.models import User
+from django.contrib.auth import login
+from .models import UserProfile
+
+def register(request):
+    """User registration page"""
+    if request.method == 'POST':
+        username = request.POST.get('username')
+        email = request.POST.get('email')
+        phone = request.POST.get('phone')
+        password = request.POST.get('password')
+        confirm_password = request.POST.get('confirm_password')
+        registration_code = request.POST.get('registration_code', '')
+        
+        # Validation
+        if not username or not password or not confirm_password:
+            messages.error(request, 'Please fill in all required fields.')
+            return render(request, 'laundry/register.html')
+        
+        if password != confirm_password:
+            messages.error(request, 'Passwords do not match.')
+            return render(request, 'laundry/register.html')
+        
+        if User.objects.filter(username=username).exists():
+            messages.error(request, 'Username already exists. Please choose another.')
+            return render(request, 'laundry/register.html')
+        
+        if email and User.objects.filter(email=email).exists():
+            messages.error(request, 'Email already registered.')
+            return render(request, 'laundry/register.html')
+        
+        # Check if user wants to be manager
+        is_manager = (registration_code == 'zenclean123')
+        role = 'manager' if is_manager else 'staff'
+        
+        # Create user
+        try:
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                password=password
+            )
+            
+            # Create profile with role
+            profile = UserProfile.objects.create(
+                user=user,
+                role=role,
+                phone=phone
+            )
+            
+            # Log the user in
+            login(request, user)
+            
+            if is_manager:
+                messages.success(request, '🎉 Welcome! You are registered as Manager.')
+            else:
+                messages.success(request, '✅ Registration successful!')
+            
+            return redirect('dashboard')
+            
+        except Exception as e:
+            messages.error(request, f'Registration failed: {str(e)}')
+            return render(request, 'laundry/register.html')
+    
+    return render(request, 'laundry/register.html')
+
+# ============================================================
+# EXPORT FUNCTIONS
+# ============================================================
+
+@login_required
+@manager_required
+def export_accounting_pdf(request):
+    """Export accounting report as PDF - FIXED version"""
+    from django.db.models import Sum
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib import colors
+    from io import BytesIO
+    
+    buffer = BytesIO()
+    
+    # Create PDF
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], 
+                                fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    heading_style = ParagraphStyle('Heading', parent=styles['Heading2'], 
+                                  fontSize=14, spaceAfter=10)
+    
+    story = []
+    company = getattr(settings, 'COMPANY_NAME', 'ZenClean')
+    story.append(Paragraph(f"{company} - Accounting Report", title_style))
+    story.append(Paragraph(f"Generated: {timezone.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # Trial Balance
+    story.append(Paragraph("TRIAL BALANCE", heading_style))
+    
+    accounts = LedgerAccount.objects.filter(is_active=True)
+    trial_data = [['Account Code', 'Account Name', 'Account Type', 'Debit (KSh)', 'Credit (KSh)']]
+    total_debits = 0
+    total_credits = 0
+    
+    for account in accounts:
+        total_debit = JournalEntry.objects.filter(account=account).aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = JournalEntry.objects.filter(account=account).aggregate(Sum('credit'))['credit__sum'] or 0
+        
+        if account.normal_balance == 'D':
+            balance = account.opening_balance + total_debit - total_credit
+            if balance > 0:
+                trial_data.append([account.code, account.name[:25], account.get_account_type_display(), 
+                                 f"{balance:,.2f}", "0.00"])
+                total_debits += balance
+            else:
+                trial_data.append([account.code, account.name[:25], account.get_account_type_display(), 
+                                 "0.00", f"{abs(balance):,.2f}"])
+                total_credits += abs(balance)
+        else:
+            balance = account.opening_balance + total_credit - total_debit
+            if balance > 0:
+                trial_data.append([account.code, account.name[:25], account.get_account_type_display(), 
+                                 "0.00", f"{balance:,.2f}"])
+                total_credits += balance
+            else:
+                trial_data.append([account.code, account.name[:25], account.get_account_type_display(), 
+                                 f"{abs(balance):,.2f}", "0.00"])
+                total_debits += abs(balance)
+    
+    trial_data.append(['', '', 'TOTAL', f"{total_debits:,.2f}", f"{total_credits:,.2f}"])
+    
+    trial_table = Table(trial_data, colWidths=[70, 160, 70, 90, 90])
+    trial_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#3498db')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (3, 1), (4, -1), 'RIGHT'),
+    ]))
+    story.append(trial_table)
+    
+    doc.build(story)
+    pdf = buffer.getvalue()
+    buffer.close()
+    
+    response = HttpResponse(pdf, content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="ZenClean_Trial_Balance_{datetime.now().strftime("%Y%m%d")}.pdf"'
+    return response
+
+@login_required
+@manager_required
+def export_all_books_pdf(request):
+    """Export COMPLETE Books of Account - All accounting data in one PDF"""
+    from django.db.models import Sum
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib import colors
+    from io import BytesIO
+    from datetime import datetime
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), 
+                           title="Complete Books of Account - ZenClean")
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], 
+                                fontSize=18, alignment=TA_CENTER, spaceAfter=20, 
+                                textColor=colors.HexColor('#1a237e'))
+    section_style = ParagraphStyle('SectionTitle', parent=styles['Heading2'], 
+                                  fontSize=14, alignment=TA_LEFT, spaceAfter=10,
+                                  textColor=colors.HexColor('#0d47a1'))
+    
+    story = []
+    company = getattr(settings, 'COMPANY_NAME', 'ZenClean Laundry')
+    
+    # ========== COVER PAGE ==========
+    story.append(Paragraph(f"<b>{company}</b>", title_style))
+    story.append(Paragraph("ZENCLEAN BOOKS OF ACCOUNT", title_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(f"Report Date: {datetime.now().strftime('%B %d, %Y at %H:%M')}", 
+                          styles['Normal']))
+    story.append(Paragraph("Prepared By: ZenClean Accounting System", styles['Normal']))
+    story.append(Spacer(1, 30))
+    story.append(Paragraph("=" * 80, styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    # ========== SECTION 1: TRIAL BALANCE ==========
+    story.append(PageBreak())
+    story.append(Paragraph("1. TRIAL BALANCE", section_style))
+    story.append(Spacer(1, 10))
+    
+    accounts = LedgerAccount.objects.filter(is_active=True).order_by('code')
+    tb_data = [['Code', 'Account Name', 'Type', 'Debit (KSh)', 'Credit (KSh)']]
+    tb_debits, tb_credits = 0, 0
+    
+    for acc in accounts:
+        total_debit = JournalEntry.objects.filter(account=acc).aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = JournalEntry.objects.filter(account=acc).aggregate(Sum('credit'))['credit__sum'] or 0
+        
+        if acc.normal_balance == 'D':
+            balance = acc.opening_balance + total_debit - total_credit
+            if balance > 0:
+                tb_data.append([acc.code, acc.name[:25], acc.get_account_type_display(), 
+                              f"{balance:,.2f}", "0.00"])
+                tb_debits += balance
+            else:
+                tb_data.append([acc.code, acc.name[:25], acc.get_account_type_display(), 
+                              "0.00", f"{abs(balance):,.2f}"])
+                tb_credits += abs(balance)
+        else:
+            balance = acc.opening_balance + total_credit - total_debit
+            if balance > 0:
+                tb_data.append([acc.code, acc.name[:25], acc.get_account_type_display(), 
+                              "0.00", f"{balance:,.2f}"])
+                tb_credits += balance
+            else:
+                tb_data.append([acc.code, acc.name[:25], acc.get_account_type_display(), 
+                              f"{abs(balance):,.2f}", "0.00"])
+                tb_debits += abs(balance)
+    
+    tb_data.append(['', '', 'TOTAL', f"{tb_debits:,.2f}", f"{tb_credits:,.2f}"])
+    
+    tb_table = Table(tb_data, colWidths=[60, 180, 70, 100, 100])
+    tb_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#283593')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (3, 1), (4, -1), 'RIGHT'),
+        ('FONTSIZE', (0, 0), (-1, 0), 9),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    story.append(tb_table)
+    
+    # ========== SECTION 2: INCOME STATEMENT ==========
+    story.append(PageBreak())
+    story.append(Paragraph("2. INCOME STATEMENT", section_style))
+    story.append(Spacer(1, 10))
+    
+    # Revenue
+    story.append(Paragraph("<b>REVENUE</b>", styles['Normal']))
+    rev_accounts = LedgerAccount.objects.filter(account_type='revenue', is_active=True)
+    total_rev = 0
+    rev_data = [['Account', 'Amount (KSh)']]
+    for acc in rev_accounts:
+        amt = JournalEntry.objects.filter(account=acc).aggregate(Sum('credit'))['credit__sum'] or 0
+        rev_data.append([acc.name, f"{amt:,.2f}"])
+        total_rev += amt
+    rev_data.append(['Total Revenue', f"{total_rev:,.2f}"])
+    
+    rev_table = Table(rev_data, colWidths=[250, 120])
+    rev_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1b5e20')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#2e7d32')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+    ]))
+    story.append(rev_table)
+    story.append(Spacer(1, 15))
+    
+    # Expenses
+    story.append(Paragraph("<b>EXPENSES</b>", styles['Normal']))
+    exp_accounts = LedgerAccount.objects.filter(account_type='expense', is_active=True)
+    total_exp = 0
+    exp_data = [['Account', 'Amount (KSh)']]
+    for acc in exp_accounts:
+        amt = JournalEntry.objects.filter(account=acc).aggregate(Sum('debit'))['debit__sum'] or 0
+        exp_data.append([acc.name, f"{amt:,.2f}"])
+        total_exp += amt
+    exp_data.append(['Total Expenses', f"{total_exp:,.2f}"])
+    
+    exp_table = Table(exp_data, colWidths=[250, 120])
+    exp_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#b71c1c')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#c62828')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+    ]))
+    story.append(exp_table)
+    story.append(Spacer(1, 15))
+    
+    net_income = total_rev - total_exp
+    story.append(Paragraph(f"<b>NET INCOME: KSh {net_income:,.2f}</b>", 
+                          ParagraphStyle('NetIncome', parent=styles['Heading3'],
+                                        fontSize=14, textColor=colors.HexColor('#0d47a1'))))
+    
+    # ========== SECTION 3: BALANCE SHEET ==========
+    story.append(PageBreak())
+    story.append(Paragraph("3. BALANCE SHEET", section_style))
+    story.append(Spacer(1, 10))
+    
+    # Assets
+    story.append(Paragraph("<b>ASSETS</b>", styles['Normal']))
+    asset_accounts = LedgerAccount.objects.filter(account_type='asset', is_active=True)
+    bs_data = [['ASSETS', 'Amount (KSh)'], ['', '']]
+    total_assets = 0
+    for acc in asset_accounts:
+        balance = acc.current_balance
+        bs_data.append([acc.name, f"{balance:,.2f}"])
+        total_assets += balance
+    bs_data.append(['Total Assets', f"{total_assets:,.2f}"])
+    bs_data.append(['', ''])
+    
+    # Liabilities
+    bs_data.append(['LIABILITIES', ''])
+    liab_accounts = LedgerAccount.objects.filter(account_type='liability', is_active=True)
+    total_liab = 0
+    for acc in liab_accounts:
+        balance = acc.current_balance
+        bs_data.append([acc.name, f"{balance:,.2f}"])
+        total_liab += balance
+    bs_data.append(['Total Liabilities', f"{total_liab:,.2f}"])
+    bs_data.append(['', ''])
+    
+    # Equity
+    bs_data.append(['EQUITY', ''])
+    eq_accounts = LedgerAccount.objects.filter(account_type='equity', is_active=True)
+    total_eq = 0
+    for acc in eq_accounts:
+        balance = acc.current_balance
+        bs_data.append([acc.name, f"{balance:,.2f}"])
+        total_eq += balance
+    bs_data.append(['Total Equity', f"{total_eq:,.2f}"])
+    bs_data.append(['', ''])
+    
+    # Totals
+    total_liab_eq = total_liab + total_eq
+    bs_data.append(['TOTAL LIABILITIES + EQUITY', f"{total_liab_eq:,.2f}"])
+    
+    bs_table = Table(bs_data, colWidths=[250, 120])
+    bs_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, 3), (0, 3), colors.HexColor('#1565c0')),
+        ('BACKGROUND', (0, 7), (0, 7), colors.HexColor('#e65100')),
+        ('BACKGROUND', (0, 11), (0, 11), colors.HexColor('#2e7d32')),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (1, 1), (1, -1), 'RIGHT'),
+    ]))
+    story.append(bs_table)
+    
+    # ========== SECTION 4: ASSETS REGISTER ==========
+    story.append(PageBreak())
+    story.append(Paragraph("4. ASSETS REGISTER", section_style))
+    story.append(Spacer(1, 10))
+    
+    asset_data = [['Code', 'Name', 'Type', 'Purchase Date', 'Purchase Price', 'Current Value']]
+    for asset in Asset.objects.all():
+        asset_data.append([
+            asset.asset_code,
+            asset.name[:20],
+            asset.get_asset_type_display(),
+            asset.purchase_date.strftime('%Y-%m-%d'),
+            f"{asset.purchase_price:,.2f}",
+            f"{asset.current_value:,.2f}"
+        ])
+    
+    asset_table = Table(asset_data, colWidths=[60, 120, 70, 80, 80, 80])
+    asset_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 4),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+        ('ALIGN', (4, 1), (5, -1), 'RIGHT'),
+    ]))
+    story.append(asset_table)
+    
+    # ========== SECTION 5: JOURNAL ENTRIES ==========
+    story.append(PageBreak())
+    story.append(Paragraph("5. JOURNAL ENTRIES (Recent 50)", section_style))
+    story.append(Spacer(1, 10))
+    
+    journal_data = [['Date', 'Description', 'Account', 'Debit', 'Credit']]
+    entries = JournalEntry.objects.select_related('account', 'journal').order_by('-created_at')[:50]
+    for entry in entries:
+        journal_data.append([
+            entry.created_at.strftime('%Y-%m-%d'),
+            entry.journal.description[:20] if entry.journal else '',
+            entry.account.name[:20] if entry.account else '',
+            f"{entry.debit:,.2f}" if entry.debit > 0 else '',
+            f"{entry.credit:,.2f}" if entry.credit > 0 else ''
+        ])
+    
+    journal_table = Table(journal_data, colWidths=[70, 100, 120, 80, 80])
+    journal_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 4),
+        ('FONTSIZE', (0, 1), (-1, -1), 7),
+        ('ALIGN', (3, 1), (4, -1), 'RIGHT'),
+    ]))
+    story.append(journal_table)
+    
+    # Build PDF
+    doc.build(story)
+    pdf = buffer.getvalue()
+    buffer.close()
+    
+    response = HttpResponse(pdf, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="books_of_account_{datetime.now().strftime("%Y%m%d")}.pdf"'
+    return response
+
+@login_required
+@manager_required
+def export_accounting_excel(request):
+    """Export all accounting data as Excel"""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill
+    
+    wb = Workbook()
+    
+    # Sheet 1: Trial Balance
+    ws1 = wb.active
+    ws1.title = "Trial Balance"
+    
+    headers = ['Account Code', 'Account Name', 'Account Type', 'Debit (KSh)', 'Credit (KSh)']
+    for col, header in enumerate(headers, 1):
+        cell = ws1.cell(row=1, column=col, value=header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2c3e50', end_color='2c3e50', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+    
+    accounts = LedgerAccount.objects.filter(is_active=True)
+    row = 2
+    total_debits = 0
+    total_credits = 0
+    
+    for account in accounts:
+        total_debit = JournalEntry.objects.filter(account=account).aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = JournalEntry.objects.filter(account=account).aggregate(Sum('credit'))['credit__sum'] or 0
+        
+        if account.normal_balance == 'D':
+            balance = account.opening_balance + total_debit - total_credit
+            if balance > 0:
+                ws1.cell(row=row, column=1, value=account.code)
+                ws1.cell(row=row, column=2, value=account.name)
+                ws1.cell(row=row, column=3, value=account.get_account_type_display())
+                ws1.cell(row=row, column=4, value=float(balance))
+                total_debits += balance
+            else:
+                ws1.cell(row=row, column=1, value=account.code)
+                ws1.cell(row=row, column=2, value=account.name)
+                ws1.cell(row=row, column=3, value=account.get_account_type_display())
+                ws1.cell(row=row, column=5, value=float(abs(balance)))
+                total_credits += abs(balance)
+        else:
+            balance = account.opening_balance + total_credit - total_debit
+            if balance > 0:
+                ws1.cell(row=row, column=1, value=account.code)
+                ws1.cell(row=row, column=2, value=account.name)
+                ws1.cell(row=row, column=3, value=account.get_account_type_display())
+                ws1.cell(row=row, column=5, value=float(balance))
+                total_credits += balance
+            else:
+                ws1.cell(row=row, column=1, value=account.code)
+                ws1.cell(row=row, column=2, value=account.name)
+                ws1.cell(row=row, column=3, value=account.get_account_type_display())
+                ws1.cell(row=row, column=4, value=float(abs(balance)))
+                total_debits += abs(balance)
+        row += 1
+    
+    ws1.cell(row=row, column=3, value="TOTAL").font = Font(bold=True)
+    ws1.cell(row=row, column=4, value=float(total_debits)).font = Font(bold=True)
+    ws1.cell(row=row, column=5, value=float(total_credits)).font = Font(bold=True)
+    
+    for col in range(1, 6):
+        ws1.column_dimensions[chr(64 + col)].width = 20
+    
+    # Sheet 2: Income Statement
+    ws2 = wb.create_sheet("Income Statement")
+    
+    ws2.cell(row=1, column=1, value="REVENUE").font = Font(bold=True, size=14)
+    ws2.cell(row=1, column=1).fill = PatternFill(start_color='27ae60', end_color='27ae60', fill_type='solid')
+    ws2.cell(row=1, column=1).font = Font(bold=True, color='FFFFFF')
+    
+    revenue_accounts = LedgerAccount.objects.filter(account_type='revenue', is_active=True)
+    row = 2
+    total_revenue = 0
+    for acc in revenue_accounts:
+        rev = JournalEntry.objects.filter(account=acc).aggregate(Sum('credit'))['credit__sum'] or 0
+        ws2.cell(row=row, column=1, value=acc.name)
+        ws2.cell(row=row, column=2, value=float(rev))
+        total_revenue += rev
+        row += 1
+    ws2.cell(row=row, column=1, value="Total Revenue").font = Font(bold=True)
+    ws2.cell(row=row, column=2, value=float(total_revenue)).font = Font(bold=True)
+    ws2.cell(row=row, column=2).fill = PatternFill(start_color='27ae60', end_color='27ae60', fill_type='solid')
+    ws2.cell(row=row, column=2).font = Font(bold=True, color='FFFFFF')
+    row += 2
+    
+    ws2.cell(row=row, column=1, value="EXPENSES").font = Font(bold=True, size=14)
+    ws2.cell(row=row, column=1).fill = PatternFill(start_color='e74c3c', end_color='e74c3c', fill_type='solid')
+    ws2.cell(row=row, column=1).font = Font(bold=True, color='FFFFFF')
+    row += 1
+    
+    expense_accounts = LedgerAccount.objects.filter(account_type='expense', is_active=True)
+    total_expenses = 0
+    for acc in expense_accounts:
+        exp = JournalEntry.objects.filter(account=acc).aggregate(Sum('debit'))['debit__sum'] or 0
+        ws2.cell(row=row, column=1, value=acc.name)
+        ws2.cell(row=row, column=2, value=float(exp))
+        total_expenses += exp
+        row += 1
+    ws2.cell(row=row, column=1, value="Total Expenses").font = Font(bold=True)
+    ws2.cell(row=row, column=2, value=float(total_expenses)).font = Font(bold=True)
+    ws2.cell(row=row, column=2).fill = PatternFill(start_color='e74c3c', end_color='e74c3c', fill_type='solid')
+    ws2.cell(row=row, column=2).font = Font(bold=True, color='FFFFFF')
+    row += 2
+    ws2.cell(row=row, column=1, value="NET INCOME").font = Font(bold=True, size=12)
+    ws2.cell(row=row, column=2, value=float(total_revenue - total_expenses)).font = Font(bold=True, size=12)
+    
+    ws2.column_dimensions['A'].width = 30
+    ws2.column_dimensions['B'].width = 20
+    
+    # Sheet 3: Assets
+    ws4 = wb.create_sheet("Assets Register")
+    headers = ['Code', 'Name', 'Type', 'Purchase Date', 'Purchase Price', 'Current Value', 'Depreciation', 'Location']
+    for col, header in enumerate(headers, 1):
+        cell = ws4.cell(row=1, column=col, value=header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2c3e50', end_color='2c3e50', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+    
+    row = 2
+    for asset in Asset.objects.all():
+        ws4.cell(row=row, column=1, value=asset.asset_code)
+        ws4.cell(row=row, column=2, value=asset.name)
+        ws4.cell(row=row, column=3, value=asset.get_asset_type_display())
+        ws4.cell(row=row, column=4, value=asset.purchase_date.strftime('%Y-%m-%d'))
+        ws4.cell(row=row, column=5, value=float(asset.purchase_price))
+        ws4.cell(row=row, column=6, value=float(asset.current_value))
+        ws4.cell(row=row, column=7, value=f"{asset.depreciation_rate}%")
+        ws4.cell(row=row, column=8, value=asset.location or '-')
+        row += 1
+    
+    for col in range(1, 9):
+        ws4.column_dimensions[chr(64 + col)].width = 18
+    
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename="accounting_report.xlsx"'
+    wb.save(response)
+    return response
+
+
+@login_required
+@manager_required
+def export_accounting_csv(request):
+    """Export all accounting data as CSV"""
+    from django.db.models import Sum
+    
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="accounting_report.csv"'
+    
+    writer = csv.writer(response)
+    
+    # Trial Balance
+    writer.writerow(['=' * 50])
+    writer.writerow(['TRIAL BALANCE'])
+    writer.writerow(['=' * 50])
+    writer.writerow(['Account Code', 'Account Name', 'Account Type', 'Debit (KSh)', 'Credit (KSh)'])
+    
+    accounts = LedgerAccount.objects.filter(is_active=True)
+    total_debits = 0
+    total_credits = 0
+    
+    for account in accounts:
+        total_debit = JournalEntry.objects.filter(account=account).aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = JournalEntry.objects.filter(account=account).aggregate(Sum('credit'))['credit__sum'] or 0
+        
+        if account.normal_balance == 'D':
+            balance = account.opening_balance + total_debit - total_credit
+            if balance > 0:
+                writer.writerow([account.code, account.name, account.get_account_type_display(), f"{balance:.2f}", "0.00"])
+                total_debits += balance
+            else:
+                writer.writerow([account.code, account.name, account.get_account_type_display(), "0.00", f"{abs(balance):.2f}"])
+                total_credits += abs(balance)
+        else:
+            balance = account.opening_balance + total_credit - total_debit
+            if balance > 0:
+                writer.writerow([account.code, account.name, account.get_account_type_display(), "0.00", f"{balance:.2f}"])
+                total_credits += balance
+            else:
+                writer.writerow([account.code, account.name, account.get_account_type_display(), f"{abs(balance):.2f}", "0.00"])
+                total_debits += abs(balance)
+    
+    writer.writerow(['', '', 'TOTAL', f"{total_debits:.2f}", f"{total_credits:.2f}"])
+    writer.writerow([])
+    
+    # Income Statement
+    writer.writerow(['=' * 50])
+    writer.writerow(['INCOME STATEMENT'])
+    writer.writerow(['=' * 50])
+    writer.writerow(['REVENUE:'])
+    
+    revenue_accounts = LedgerAccount.objects.filter(account_type='revenue', is_active=True)
+    total_revenue = 0
+    for acc in revenue_accounts:
+        rev = JournalEntry.objects.filter(account=acc).aggregate(Sum('credit'))['credit__sum'] or 0
+        writer.writerow([acc.name, f"{rev:.2f}"])
+        total_revenue += rev
+    writer.writerow(['Total Revenue', f"{total_revenue:.2f}"])
+    writer.writerow([])
+    
+    writer.writerow(['EXPENSES:'])
+    expense_accounts = LedgerAccount.objects.filter(account_type='expense', is_active=True)
+    total_expenses = 0
+    for acc in expense_accounts:
+        exp = JournalEntry.objects.filter(account=acc).aggregate(Sum('debit'))['debit__sum'] or 0
+        writer.writerow([acc.name, f"{exp:.2f}"])
+        total_expenses += exp
+    writer.writerow(['Total Expenses', f"{total_expenses:.2f}"])
+    writer.writerow([])
+    writer.writerow(['Net Income', f"{total_revenue - total_expenses:.2f}"])
+    writer.writerow([])
+    
+    # Assets
+    writer.writerow(['=' * 50])
+    writer.writerow(['ASSET REGISTER'])
+    writer.writerow(['=' * 50])
+    writer.writerow(['Code', 'Name', 'Type', 'Purchase Date', 'Purchase Price', 'Current Value', 'Depreciation'])
+    
+    for asset in Asset.objects.all():
+        writer.writerow([
+            asset.asset_code,
+            asset.name,
+            asset.get_asset_type_display(),
+            asset.purchase_date.strftime('%Y-%m-%d'),
+            f"{asset.purchase_price:.2f}",
+            f"{asset.current_value:.2f}",
+            f"{asset.depreciation_rate}%"
+        ])
+    
+    return response
+
+
+@login_required
+@manager_required
+def export_expenses_pdf(request):
+    """Export expenses as PDF"""
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    
+    expenses = Expense.objects.all().order_by('-date')
+    total_expenses = expenses.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="ZenClean_Expenses_{datetime.now().strftime("%Y%m%d")}.pdf"'
+    
+    doc = SimpleDocTemplate(response, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    
+    story = []
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    
+    company_name = getattr(settings, 'COMPANY_NAME', 'ZenClean')
+    story.append(Paragraph(f"{company_name} - Expenses Report", title_style))
+    story.append(Paragraph(f"Generated: {timezone.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    data = [['Date', 'Description', 'Category', 'Amount (KSh)']]
+    total = 0
+    for exp in expenses:
+        data.append([
+            exp.date.strftime('%Y-%m-%d'),
+            exp.description[:30],
+            exp.get_category_display(),
+            f"{exp.amount:,.2f}"
+        ])
+        total += exp.amount
+    data.append(['', '', 'TOTAL', f"{total:,.2f}"])
+    
+    table = Table(data, colWidths=[80, 150, 100, 100])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#3498db')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (3, 1), (3, -1), 'RIGHT'),
+    ]))
+    story.append(table)
+    doc.build(story)
+    return response
+
+
+@login_required
+@manager_required
+def export_expenses_excel(request):
+    """Export expenses as Excel"""
+    expenses = Expense.objects.all().order_by('-date')
+    total_expenses = expenses.aggregate(Sum('amount'))['amount__sum'] or 0
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Expenses"
+    
+    headers = ['Date', 'Description', 'Category', 'Amount (KSh)']
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2c3e50', end_color='2c3e50', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+    
+    row = 2
+    for exp in expenses:
+        ws.cell(row=row, column=1, value=exp.date.strftime('%Y-%m-%d'))
+        ws.cell(row=row, column=2, value=exp.description)
+        ws.cell(row=row, column=3, value=exp.get_category_display())
+        ws.cell(row=row, column=4, value=float(exp.amount))
+        row += 1
+    
+    ws.cell(row=row, column=3, value="TOTAL").font = Font(bold=True)
+    ws.cell(row=row, column=4, value=float(total_expenses)).font = Font(bold=True)
+    
+    for col in range(1, 5):
+        ws.column_dimensions[chr(64 + col)].width = 20
+    
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = 'attachment; filename="ZenClean_Expenses_{datetime.now().strftime("%Y%m%d")}.xlsx"'
+    wb.save(response)
+    return response
+
+
+@login_required
+@manager_required
+def export_assets_pdf(request):
+    """Export assets as PDF"""
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    
+    assets = Asset.objects.all().order_by('-created_at')
+    total_value = assets.aggregate(Sum('current_value'))['current_value__sum'] or 0
+    
+    response = HttpResponse(content_type='application/pdf')
+    response['Content-Disposition'] = 'attachment; filename="ZenClean_Assets_{datetime.now().strftime("%Y%m%d")}.pdf"'
+    
+    doc = SimpleDocTemplate(response, pagesize=landscape(A4))
+    styles = getSampleStyleSheet()
+    
+    story = []
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=16, alignment=TA_CENTER, spaceAfter=20)
+    
+    company_name = getattr(settings, 'COMPANY_NAME', 'ZenClean')
+    story.append(Paragraph(f"{company_name} - Assets Report", title_style))
+    story.append(Paragraph(f"Generated: {timezone.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    story.append(Spacer(1, 20))
+    
+    data = [['Code', 'Name', 'Type', 'Purchase Date', 'Purchase Price', 'Current Value', 'Depreciation']]
+    for asset in assets:
+        data.append([
+            asset.asset_code,
+            asset.name[:20],
+            asset.get_asset_type_display(),
+            asset.purchase_date.strftime('%Y-%m-%d'),
+            f"{asset.purchase_price:,.2f}",
+            f"{asset.current_value:,.2f}",
+            f"{asset.depreciation_rate}%"
+        ])
+    data.append(['', '', '', '', '', 'TOTAL', f"{total_value:,.2f}"])
+    
+    table = Table(data, colWidths=[60, 120, 80, 80, 80, 80, 60])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#27ae60')),
+        ('TEXTCOLOR', (0, -1), (-1, -1), colors.white),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('PADDING', (0, 0), (-1, -1), 5),
+        ('ALIGN', (4, 1), (6, -1), 'RIGHT'),
+    ]))
+    story.append(table)
+    doc.build(story)
+    return response
+
+
+@login_required
+@manager_required
+def export_assets_excel(request):
+    """Export assets as Excel"""
+    assets = Asset.objects.all().order_by('-created_at')
+    total_value = assets.aggregate(Sum('current_value'))['current_value__sum'] or 0
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Assets"
+    
+    headers = ['Code', 'Name', 'Type', 'Purchase Date', 'Purchase Price', 'Current Value', 'Depreciation', 'Location']
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2c3e50', end_color='2c3e50', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+    
+    row = 2
+    for asset in assets:
+        ws.cell(row=row, column=1, value=asset.asset_code)
+        ws.cell(row=row, column=2, value=asset.name)
+        ws.cell(row=row, column=3, value=asset.get_asset_type_display())
+        ws.cell(row=row, column=4, value=asset.purchase_date.strftime('%Y-%m-%d'))
+        ws.cell(row=row, column=5, value=float(asset.purchase_price))
+        ws.cell(row=row, column=6, value=float(asset.current_value))
+        ws.cell(row=row, column=7, value=f"{asset.depreciation_rate}%")
+        ws.cell(row=row, column=8, value=asset.location or '-')
+        row += 1
+    
+    ws.cell(row=row, column=6, value="TOTAL VALUE").font = Font(bold=True)# ============================================================
+# ACCOUNTANT PACKAGE EXPORT
+# ============================================================
+
+@login_required
+@manager_required
+def export_accountant_package(request):
+    """Generate a complete accounting package (Accountant Mode)."""
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib import colors
+    from io import BytesIO
+    from django.db.models import Sum
+    from datetime import datetime
+    from .models import LedgerAccount, JournalEntry, Journal, Order, Expense, Asset, Liability, Equity
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, title="Accountant's Package")
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=20, alignment=TA_CENTER, spaceAfter=20)
+    section_style = ParagraphStyle('Section', parent=styles['Heading2'], fontSize=16, alignment=TA_LEFT, spaceAfter=12)
+    normal_style = styles['Normal']
+
+    story = []
+    company = getattr(settings, 'COMPANY_NAME', 'ZenClean Laundry')
+
+    def get_balance(account):
+        total_debit = JournalEntry.objects.filter(account=account).aggregate(Sum('debit'))['debit__sum'] or 0
+        total_credit = JournalEntry.objects.filter(account=account).aggregate(Sum('credit'))['credit__sum'] or 0
+        if account.normal_balance == 'D':
+            return account.opening_balance + total_debit - total_credit
+        else:
+            return account.opening_balance + total_credit - total_debit
+
+    # Fallback totals
+    fallback_revenue = Order.objects.filter(payment_status='paid').aggregate(Sum('total_amount'))['total_amount__sum'] or 0
+    fallback_expenses = Expense.objects.aggregate(Sum('amount'))['amount__sum'] or 0
+    fallback_assets = Asset.objects.aggregate(Sum('current_value'))['current_value__sum'] or 0
+
+    all_rev = LedgerAccount.objects.filter(account_type='revenue', is_active=True)
+    all_exp = LedgerAccount.objects.filter(account_type='expense', is_active=True)
+    all_asset = LedgerAccount.objects.filter(account_type='asset', is_active=True)
+
+    total_rev = sum(get_balance(acc) for acc in all_rev) or fallback_revenue
+    total_exp = sum(get_balance(acc) for acc in all_exp) or fallback_expenses
+    total_assets = sum(get_balance(acc) for acc in all_asset) or fallback_assets
+
+    total_liab = sum(get_balance(acc) for acc in LedgerAccount.objects.filter(account_type='liability', is_active=True)) or 0
+    total_eq = sum(get_balance(acc) for acc in LedgerAccount.objects.filter(account_type='equity', is_active=True)) or 0
+
+    net_profit = total_rev - total_exp
+
+    # Title Page
+    story.append(Paragraph(f"<b>{company}</b>", title_style))
+    story.append(Paragraph("COMPLETE ACCOUNTING PACKAGE", title_style))
+    story.append(Paragraph(f"Prepared for: {request.user.username}", normal_style))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y at %H:%M')}", normal_style))
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("This package includes:", normal_style))
+    story.append(Paragraph("• Chart of Accounts", normal_style))
+    story.append(Paragraph("• General Journal (all entries)", normal_style))
+    story.append(Paragraph("• General Ledger (T-accounts)", normal_style))
+    story.append(Paragraph("• Trial Balance", normal_style))
+    story.append(Paragraph("• Income Statement", normal_style))
+    story.append(Paragraph("• Balance Sheet", normal_style))
+    story.append(Paragraph("• Cash Flow Statement", normal_style))
+    story.append(Paragraph("• Audit Trail", normal_style))
+    story.append(PageBreak())
+
+    # Chart of Accounts
+    story.append(Paragraph("1. CHART OF ACCOUNTS", section_style))
+    accounts = LedgerAccount.objects.filter(is_active=True).order_by('account_type', 'code')
+    data = [['Code', 'Name', 'Type', 'Normal Balance']]
+    for acc in accounts:
+        data.append([acc.code, acc.name, acc.get_account_type_display(), acc.get_normal_balance_display()])
+    table = Table(data, colWidths=[60, 200, 80, 80])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('FONTSIZE', (0,1), (-1,-1), 8),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # General Journal
+    story.append(Paragraph("2. GENERAL JOURNAL", section_style))
+    entries = JournalEntry.objects.select_related('account', 'journal').order_by('-created_at')
+    if entries:
+        data = [['Date', 'Journal #', 'Account', 'Debit', 'Credit', 'Description']]
+        for je in entries:
+            data.append([
+                je.created_at.strftime('%Y-%m-%d'),
+                je.journal.entry_number if je.journal else '',
+                je.account.name if je.account else '',
+                f"{je.debit:.2f}" if je.debit else '',
+                f"{je.credit:.2f}" if je.credit else '',
+                je.description[:40] if je.description else ''
+            ])
+        table = Table(data, colWidths=[70, 70, 130, 80, 80, 150])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0d47a1')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ('PADDING', (0,0), (-1,-1), 4),
+            ('FONTSIZE', (0,1), (-1,-1), 7),
+            ('ALIGN', (3,1), (4,-1), 'RIGHT'),
+        ]))
+        story.append(table)
+    else:
+        story.append(Paragraph("No journal entries found.", normal_style))
+    story.append(PageBreak())
+
+    # General Ledger
+    story.append(Paragraph("3. GENERAL LEDGER (T-ACCOUNTS)", section_style))
+    acc_balances = []
+    for acc in LedgerAccount.objects.filter(is_active=True).order_by('code'):
+        td = JournalEntry.objects.filter(account=acc).aggregate(Sum('debit'))['debit__sum'] or 0
+        tc = JournalEntry.objects.filter(account=acc).aggregate(Sum('credit'))['credit__sum'] or 0
+        bal = get_balance(acc)
+        acc_balances.append((acc.code, acc.name, td, tc, bal))
+    data = [['Code', 'Name', 'Total Debit', 'Total Credit', 'Balance']]
+    for code, name, td, tc, bal in acc_balances:
+        data.append([code, name, f"{td:.2f}", f"{tc:.2f}", f"{bal:.2f}"])
+    table = Table(data, colWidths=[60, 180, 80, 80, 80])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('FONTSIZE', (0,1), (-1,-1), 8),
+        ('ALIGN', (2,1), (4,-1), 'RIGHT'),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # Trial Balance
+    story.append(Paragraph("4. TRIAL BALANCE", section_style))
+    tb_data = [['Code', 'Name', 'Debit', 'Credit']]
+    tb_debits = 0
+    tb_credits = 0
+    for acc in LedgerAccount.objects.filter(is_active=True).order_by('code'):
+        bal = get_balance(acc)
+        if bal > 0:
+            if acc.normal_balance == 'D':
+                tb_data.append([acc.code, acc.name, f"{bal:.2f}", ""])
+                tb_debits += bal
+            else:
+                tb_data.append([acc.code, acc.name, "", f"{bal:.2f}"])
+                tb_credits += bal
+        elif bal < 0:
+            if acc.normal_balance == 'D':
+                tb_data.append([acc.code, acc.name, "", f"{abs(bal):.2f}"])
+                tb_credits += abs(bal)
+            else:
+                tb_data.append([acc.code, acc.name, f"{abs(bal):.2f}", ""])
+                tb_debits += abs(bal)
+    tb_data.append(['', 'TOTAL', f"{tb_debits:.2f}", f"{tb_credits:.2f}"])
+    table = Table(tb_data, colWidths=[60, 180, 100, 100])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#283593')),
+        ('TEXTCOLOR', (0,-1), (-1,-1), colors.white),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('ALIGN', (2,1), (3,-1), 'RIGHT'),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # Income Statement
+    story.append(Paragraph("5. INCOME STATEMENT", section_style))
+    is_data = []
+    is_data.append(['REVENUE', ''])
+    rev_subtotal = 0
+    for acc in all_rev:
+        bal = get_balance(acc)
+        is_data.append([acc.name, f"{bal:.2f}"])
+        rev_subtotal += bal
+    if rev_subtotal == 0 and fallback_revenue > 0:
+        is_data.append(['Revenue (from paid orders)', f"{fallback_revenue:.2f}"])
+    is_data.append(['Total Revenue', f"{total_rev:.2f}"])
+    is_data.append(['', ''])
+
+    is_data.append(['EXPENSES', ''])
+    exp_subtotal = 0
+    for acc in all_exp:
+        bal = get_balance(acc)
+        is_data.append([acc.name, f"{bal:.2f}"])
+        exp_subtotal += bal
+    if exp_subtotal == 0 and fallback_expenses > 0:
+        is_data.append(['Expenses (from Expense model)', f"{fallback_expenses:.2f}"])
+    is_data.append(['Total Expenses', f"{total_exp:.2f}"])
+    is_data.append(['', ''])
+    is_data.append(['NET INCOME', f"{net_profit:.2f}"])
+
+    table = Table(is_data, colWidths=[200, 100])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1b5e20')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('BACKGROUND', (0,4), (-1,4), colors.HexColor('#2e7d32')),
+        ('TEXTCOLOR', (0,4), (-1,4), colors.white),
+        ('BACKGROUND', (0,8), (-1,8), colors.HexColor('#c62828')),
+        ('TEXTCOLOR', (0,8), (-1,8), colors.white),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0,-1), (-1,-1), colors.white),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('ALIGN', (1,1), (1,-1), 'RIGHT'),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # Balance Sheet
+    story.append(Paragraph("6. BALANCE SHEET", section_style))
+    bs_data = []
+    bs_data.append(['ASSETS', ''])
+    total_assets_display = 0
+    for acc in all_asset:
+        bal = get_balance(acc)
+        bs_data.append([acc.name, f"{bal:.2f}"])
+        total_assets_display += bal
+    if total_assets_display == 0 and fallback_assets > 0:
+        bs_data.append(['Assets (from Asset model)', f"{fallback_assets:.2f}"])
+        total_assets_display = fallback_assets
+    bs_data.append(['Total Assets', f"{total_assets_display:.2f}"])
+    bs_data.append(['', ''])
+
+    bs_data.append(['LIABILITIES', ''])
+    total_liab_display = 0
+    for acc in LedgerAccount.objects.filter(account_type='liability', is_active=True):
+        bal = get_balance(acc)
+        bs_data.append([acc.name, f"{bal:.2f}"])
+        total_liab_display += bal
+    bs_data.append(['Total Liabilities', f"{total_liab_display:.2f}"])
+    bs_data.append(['', ''])
+
+    bs_data.append(['EQUITY', ''])
+    total_eq_display = 0
+    for acc in LedgerAccount.objects.filter(account_type='equity', is_active=True):
+        bal = get_balance(acc)
+        bs_data.append([acc.name, f"{bal:.2f}"])
+        total_eq_display += bal
+    bs_data.append(['Total Equity', f"{total_eq_display:.2f}"])
+    bs_data.append(['', ''])
+    bs_data.append(['TOTAL LIABILITIES + EQUITY', f"{total_liab_display + total_eq_display:.2f}"])
+
+    table = Table(bs_data, colWidths=[200, 100])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('BACKGROUND', (0,4), (0,4), colors.HexColor('#e65100')),
+        ('BACKGROUND', (0,9), (0,9), colors.HexColor('#2e7d32')),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0,-1), (-1,-1), colors.white),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # Cash Flow
+    story.append(Paragraph("7. CASH FLOW STATEMENT (simplified)", section_style))
+    cash_data = [
+        ['Cash flows from operating activities', ''],
+        ['Net Income', f"{net_profit:.2f}"],
+        ['Adjustments for non-cash items', ''],
+        ['Depreciation', '0.00'],
+        ['Net cash provided by operating activities', f"{net_profit:.2f}"],
+        ['', ''],
+        ['Cash flows from investing activities', ''],
+        ['Purchase of fixed assets', '0.00'],
+        ['Net cash used in investing', '0.00'],
+        ['', ''],
+        ['Cash flows from financing activities', ''],
+        ['Net cash from financing', '0.00'],
+        ['', ''],
+        ['Net increase in cash', f"{net_profit:.2f}"],
+        ['Cash at beginning of period', '0.00'],
+        ['Cash at end of period', f"{net_profit:.2f}"],
+    ]
+    table = Table(cash_data, colWidths=[250, 100])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1a237e')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('BACKGROUND', (0,4), (-1,4), colors.HexColor('#2e7d32')),
+        ('TEXTCOLOR', (0,4), (-1,4), colors.white),
+        ('BACKGROUND', (0,7), (-1,7), colors.HexColor('#e65100')),
+        ('TEXTCOLOR', (0,7), (-1,7), colors.white),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#0d47a1')),
+        ('TEXTCOLOR', (0,-1), (-1,-1), colors.white),
+        ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+        ('GRID', (0,0), (-1,-1), 1, colors.black),
+        ('PADDING', (0,0), (-1,-1), 5),
+        ('ALIGN', (1,1), (1,-1), 'RIGHT'),
+    ]))
+    story.append(table)
+    story.append(PageBreak())
+
+    # Audit Trail
+    story.append(Paragraph("8. AUDIT TRAIL (recent changes)", section_style))
+    try:
+        from .models import AuditLog
+        logs = AuditLog.objects.all().order_by('-created_at')[:100]
+        if logs:
+            data = [['User', 'Action', 'Model', 'Object', 'Date']]
+            for log in logs:
+                data.append([log.user.username, log.action, log.model_name, log.object_repr, log.created_at.strftime('%Y-%m-%d %H:%M')])
+            table = Table(data, colWidths=[80, 80, 100, 150, 120])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0d47a1')),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('GRID', (0,0), (-1,-1), 1, colors.black),
+                ('PADDING', (0,0), (-1,-1), 4),
+                ('FONTSIZE', (0,1), (-1,-1), 7),
+            ]))
+            story.append(table)
+        else:
+            story.append(Paragraph("No audit trail records found.", normal_style))
+    except:
+        story.append(Paragraph("Audit trail not available.", normal_style))
+
+    doc.build(story)
+    pdf = buffer.getvalue()
+    buffer.close()
+
+    response = HttpResponse(pdf, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="ZenClean_Accountant_Package_{datetime.now().strftime("%Y%m%d_%H%M")}.pdf"'
+    return response
+
+

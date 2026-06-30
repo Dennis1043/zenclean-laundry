@@ -1,0 +1,415 @@
+﻿{% extends 'base/base.html' %}
+{% block title %}Assets Management{% endblock %}
+{% block page_title %}Asset Register{% endblock %}
+
+{% block extra_css %}
+<style>
+    .asset-summary {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+        margin-bottom: 25px;
+    }
+    .asset-summary-card {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        text-align: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .asset-summary-card .value {
+        font-size: 28px;
+        font-weight: 800;
+        color: #2c3e50;
+    }
+    .asset-summary-card .label {
+        font-size: 14px;
+        color: #6c757d;
+        margin-top: 5px;
+    }
+    .asset-summary-card.primary .value { color: #4361ee; }
+    .asset-summary-card.success .value { color: #27ae60; }
+    .asset-summary-card.warning .value { color: #f39c12; }
+    
+    .asset-card {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        border-left: 4px solid #4361ee;
+        transition: transform 0.3s;
+    }
+    .asset-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+    .asset-card .asset-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .asset-card .asset-code {
+        font-weight: bold;
+        color: #4361ee;
+        font-size: 14px;
+    }
+    .asset-card .asset-name {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 5px 0;
+    }
+    .asset-card .asset-details {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 10px;
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid #eee;
+    }
+    .asset-card .asset-detail-item .label {
+        font-size: 11px;
+        color: #6c757d;
+        text-transform: uppercase;
+    }
+    .asset-card .asset-detail-item .value {
+        font-size: 16px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    .asset-card .asset-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .badge-type {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 500;
+    }
+    .badge-fixed { background: #d4edda; color: #155724; }
+    .badge-current { background: #d1ecf1; color: #0c5460; }
+    .badge-intangible { background: #fff3cd; color: #856404; }
+    .badge-investment { background: #f8d7da; color: #721c24; }
+    
+    .modal-content {
+        border-radius: 16px;
+    }
+    .modal-header {
+        background: #2c3e50;
+        color: white;
+        border-radius: 16px 16px 0 0;
+    }
+    .modal-header .btn-close {
+        filter: invert(1);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="asset-summary">
+    <div class="asset-summary-card primary">
+        <div class="value">KSh {{ total_assets_value|floatformat:0 }}</div>
+        <div class="label">Total Assets Value</div>
+    </div>
+    <div class="asset-summary-card success">
+        <div class="value">{{ assets|length }}</div>
+        <div class="label">Total Assets</div>
+    </div>
+    <div class="asset-summary-card warning">
+        <div class="value">KSh {{ total_depreciation|floatformat:0 }}</div>
+        <div class="label">Total Depreciation</div>
+    </div>
+</div>
+
+<!-- Add Asset Button -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+    <h5 style="margin: 0;">ðŸ“Š Asset Register</h5>
+    <button class="btn btn-custom" onclick="openAddAssetModal()">
+        <i class="fas fa-plus"></i> Add Asset
+    </button>
+</div>
+<div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
+    <a href="{% url 'export_assets_pdf' %}" class="btn btn-danger">
+        <i class="fas fa-file-pdf"></i> Export PDF
+    </a>
+    <a href="{% url 'export_assets_excel' %}" class="btn btn-success">
+        <i class="fas fa-file-excel"></i> Export Excel
+    </a>
+</div>
+<!-- Asset List -->
+<div id="assetList">
+    {% for asset in assets %}
+    <div class="asset-card">
+        <div class="asset-header">
+            <div>
+                <div class="asset-code">{{ asset.asset_code }}</div>
+                <div class="asset-name">{{ asset.name }}</div>
+                <span class="badge-type badge-{{ asset.asset_type }}">{{ asset.get_asset_type_display }}</span>
+            </div>
+            <div>
+                <button class="btn btn-sm btn-warning" onclick="openEditAssetModal({{ asset.id }})">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-sm btn-danger" onclick="deleteAsset({{ asset.id }})">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+        </div>
+        <div class="asset-details">
+            <div class="asset-detail-item">
+                <div class="label">Purchase Date</div>
+                <div class="value">{{ asset.purchase_date|date:"M d, Y" }}</div>
+            </div>
+            <div class="asset-detail-item">
+                <div class="label">Purchase Price</div>
+                <div class="value">KSh {{ asset.purchase_price|floatformat:0 }}</div>
+            </div>
+            <div class="asset-detail-item">
+                <div class="label">Current Value</div>
+                <div class="value">KSh {{ asset.current_value|floatformat:0 }}</div>
+            </div>
+            <div class="asset-detail-item">
+                <div class="label">Depreciation</div>
+                <div class="value">{{ asset.depreciation_rate }}%</div>
+            </div>
+            <div class="asset-detail-item">
+                <div class="label">Location</div>
+                <div class="value">{{ asset.location|default:"-" }}</div>
+            </div>
+            <div class="asset-detail-item">
+                <div class="label">Description</div>
+                <div class="value">{{ asset.description|truncatechars:30|default:"-" }}</div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div style="text-align: center; padding: 50px; background: white; border-radius: 16px;">
+        <i class="fas fa-box-open fa-4x" style="color: #ddd;"></i>
+        <h5 style="margin-top: 15px;">No Assets Yet</h5>
+        <p style="color: #6c757d;">Click "Add Asset" to register your first asset.</p>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Add/Edit Asset Modal -->
+<div class="modal fade" id="assetModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="assetModalTitle">Add New Asset</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="assetForm">
+                    {% csrf_token %}
+                    <input type="hidden" id="asset_id" name="asset_id">
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Asset Code *</label>
+                                <input type="text" id="asset_code" name="asset_code" class="form-control" placeholder="e.g., ASSET-001" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Asset Name *</label>
+                                <input type="text" id="asset_name" name="name" class="form-control" placeholder="e.g., Washing Machine" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Asset Type *</label>
+                                <select id="asset_type" name="asset_type" class="form-control" required>
+                                    <option value="">Select Type</option>
+                                    <option value="fixed">Fixed Asset</option>
+                                    <option value="current">Current Asset</option>
+                                    <option value="intangible">Intangible Asset</option>
+                                    <option value="investment">Investment</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Purchase Date *</label>
+                                <input type="date" id="purchase_date" name="purchase_date" class="form-control" required>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Purchase Price (KSh) *</label>
+                                <input type="number" id="purchase_price" name="purchase_price" class="form-control" step="0.01" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Current Value (KSh) *</label>
+                                <input type="number" id="current_value" name="current_value" class="form-control" step="0.01" required>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label class="form-label">Depreciation Rate (%)</label>
+                                <input type="number" id="depreciation_rate" name="depreciation_rate" class="form-control" step="0.01" value="0">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Accumulated Depreciation</label>
+                                <input type="number" id="accumulated_depreciation" name="accumulated_depreciation" class="form-control" step="0.01" value="0">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Location</label>
+                                <input type="text" id="location" name="location" class="form-control" placeholder="e.g., Main Store">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea id="description" name="description" class="form-control" rows="2" placeholder="Additional details about the asset"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-custom" onclick="saveAsset()">Save Asset</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Open Add Asset Modal
+function openAddAssetModal() {
+    document.getElementById('assetModalTitle').textContent = 'Add New Asset';
+    document.getElementById('assetForm').reset();
+    document.getElementById('asset_id').value = '';
+    document.getElementById('asset_code').value = 'ASSET-' + String(Math.floor(Math.random() * 10000)).padStart(3, '0');
+    var modal = new bootstrap.Modal(document.getElementById('assetModal'));
+    modal.show();
+}
+
+// Open Edit Asset Modal
+function openEditAssetModal(assetId) {
+    fetch('/assets/edit/' + assetId + '/')
+        .then(response => response.text())
+        .then(html => {
+            // Parse the form data from the response
+            var tempDiv = document.createElement('div');
+            tempDiv.innerHTML = html;
+            var form = tempDiv.querySelector('form');
+            
+            document.getElementById('assetModalTitle').textContent = 'Edit Asset';
+            document.getElementById('asset_id').value = assetId;
+            document.getElementById('asset_code').value = form.querySelector('[name="asset_code"]').value;
+            document.getElementById('asset_name').value = form.querySelector('[name="name"]').value;
+            document.getElementById('asset_type').value = form.querySelector('[name="asset_type"]').value;
+            document.getElementById('purchase_date').value = form.querySelector('[name="purchase_date"]').value;
+            document.getElementById('purchase_price').value = form.querySelector('[name="purchase_price"]').value;
+            document.getElementById('current_value').value = form.querySelector('[name="current_value"]').value;
+            document.getElementById('depreciation_rate').value = form.querySelector('[name="depreciation_rate"]').value;
+            document.getElementById('accumulated_depreciation').value = form.querySelector('[name="accumulated_depreciation"]').value;
+            document.getElementById('location').value = form.querySelector('[name="location"]').value;
+            document.getElementById('description').value = form.querySelector('[name="description"]').value;
+            
+            var modal = new bootstrap.Modal(document.getElementById('assetModal'));
+            modal.show();
+        });
+}
+
+// Save Asset
+function saveAsset() {
+    var form = document.getElementById('assetForm');
+    var formData = new FormData(form);
+    var assetId = document.getElementById('asset_id').value;
+    var url = assetId ? '/assets/edit/' + assetId + '/' : '/assets/create/';
+    
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotification(data.message, 'success');
+            var modal = bootstrap.Modal.getInstance(document.getElementById('assetModal'));
+            modal.hide();
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showNotification('Error: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showNotification('Network error: ' + error, 'error');
+    });
+}
+
+// Delete Asset
+function deleteAsset(assetId) {
+    if (confirm('Are you sure you want to delete this asset?')) {
+        fetch('/assets/delete/' + assetId + '/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCookie('csrftoken'),
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(data.message, 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showNotification('Error: ' + data.error, 'error');
+            }
+        });
+    }
+}
+
+// Get CSRF Token
+function getCookie(name) {
+    var value = null;
+    if (document.cookie && document.cookie !== '') {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+            var cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                value = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return value;
+}
+
+// Show Notification
+function showNotification(message, type) {
+    var notification = document.createElement('div');
+    notification.textContent = message;
+    var bgColor = type === 'success' ? '#06d6a0' : '#ef476f';
+    notification.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 20px;background:' + bgColor + ';color:white;border-radius:10px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+    document.body.appendChild(notification);
+    setTimeout(function() { notification.remove(); }, 3000);
+}
+</script>
+{% endblock %}
+

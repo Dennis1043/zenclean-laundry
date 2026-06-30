@@ -3,183 +3,343 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZenClean Laundry - {% block title %}Dashboard{% endblock %}</title>
+    <title>{{ company_name }} Laundry - {% block title %}Dashboard{% endblock %}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    {% load static %}
     <style>
         :root {
-            --primary-color: #2c3e50;
-            --secondary-color: #3498db;
-            --success-color: #27ae60;
-            --warning-color: #f39c12;
-            --danger-color: #e74c3c;
-            --light-bg: #f8f9fa;
+            --primary: #2c3e50;
+            --secondary: #3498db;
+            --success: #27ae60;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --light: #f0f2f5;
+            --sidebar-width: 240px;
         }
         
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: var(--light-bg);
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--light); }
         
         .sidebar {
-            min-height: 100vh;
-            background: linear-gradient(135deg, var(--primary-color) 0%, #34495e 100%);
-            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            position: fixed;
+            left: 0;
+            top: 0;
+            width: var(--sidebar-width);
+            height: 100vh;
+            background: linear-gradient(180deg, #1a252f 0%, #2c3e50 100%);
+            z-index: 1000;
+            transition: all 0.3s ease;
+            overflow-y: auto;
+            padding-bottom: 20px;
         }
         
+        .sidebar-brand {
+            padding: 20px 15px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        
+        .sidebar-brand .logo-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .sidebar-brand .logo-container img {
+            max-width: 140px;
+            max-height: 60px;
+            object-fit: contain;
+        }
+        
+        .sidebar-brand h4 {
+            color: white;
+            font-weight: 700;
+            margin: 8px 0 2px;
+            letter-spacing: 1px;
+        }
+        
+        .sidebar-brand span {
+            color: rgba(255,255,255,0.4);
+            font-size: 11px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        
+        .sidebar .nav { padding: 10px 12px; }
         .sidebar .nav-link {
-            color: rgba(255,255,255,0.8);
-            padding: 12px 20px;
-            margin: 5px 0;
+            color: rgba(255,255,255,0.5);
+            padding: 10px 15px;
             border-radius: 10px;
-            transition: all 0.3s;
-            display: block;
+            display: flex;
+            align-items: center;
             text-decoration: none;
+            transition: all 0.3s;
+            font-size: 14px;
+            margin: 2px 0;
         }
-        
         .sidebar .nav-link:hover {
-            background: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.06);
             color: white;
-            transform: translateX(5px);
+            transform: translateX(4px);
         }
-        
+        .sidebar .nav-link.active {
+            background: rgba(52, 152, 219, 0.2);
+            color: white;
+        }
         .sidebar .nav-link i {
-            margin-right: 10px;
-            width: 20px;
+            width: 22px;
+            margin-right: 12px;
+            text-align: center;
+            font-size: 15px;
         }
-        
-        .navbar-top {
-            background: white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .stat-card {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            transition: transform 0.3s;
-        }
-        
-        .stat-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-        }
-        
-        .stat-icon {
-            font-size: 40px;
-            color: var(--secondary-color);
-        }
-        
-        .stat-value {
-            font-size: 28px;
-            font-weight: bold;
-            color: var(--primary-color);
-        }
-        
-        .btn-custom {
-            background: var(--secondary-color);
+        .sidebar .nav-link .badge {
+            margin-left: auto;
+            background: var(--danger);
             color: white;
-            border-radius: 8px;
-            padding: 10px 20px;
-            transition: all 0.3s;
-            text-decoration: none;
-            display: inline-block;
+            font-size: 10px;
+            padding: 2px 9px;
+            border-radius: 12px;
+        }
+        .sidebar hr {
+            border-color: rgba(255,255,255,0.06);
+            margin: 10px 15px;
         }
         
-        .btn-custom:hover {
-            background: #2980b9;
-            transform: translateY(-2px);
-            color: white;
-        }
-        
-        .table-custom {
-            background: white;
-            border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        .table-custom thead {
-            background: var(--primary-color);
-            color: white;
-        }
-        
-        .status-badge {
-            padding: 5px 10px;
-            border-radius: 20px;
+        .sidebar .user-info {
+            padding: 10px 15px;
+            color: rgba(255,255,255,0.4);
             font-size: 12px;
-            font-weight: bold;
+        }
+        .sidebar .user-info .name {
+            color: rgba(255,255,255,0.8);
+            font-weight: 500;
+        }
+        .sidebar .user-info .role {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: rgba(255,255,255,0.3);
         }
         
-        .status-pending { background: #f39c12; color: white; }
-        .status-washing { background: #3498db; color: white; }
-        .status-ready { background: #27ae60; color: white; }
-        .status-completed { background: #95a5a6; color: white; }
+        .sidebar .company-footer {
+            position: absolute;
+            bottom: 10px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            padding: 10px;
+            color: rgba(255,255,255,0.2);
+            font-size: 10px;
+        }
+        
+        .main-content {
+            margin-left: var(--sidebar-width);
+            min-height: 100vh;
+            padding: 20px 30px;
+        }
+        
+        .top-bar {
+            background: white;
+            border-radius: 14px;
+            padding: 14px 24px;
+            margin-bottom: 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+        .top-bar .page-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--primary);
+            margin: 0;
+        }
+        .top-bar .user-area {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .top-bar .user-area .phone {
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+        .top-bar .user-area .date {
+            color: #7f8c8d;
+            font-size: 13px;
+        }
+        .top-bar .user-area .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--secondary), #1abc9c);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+        }
+        .top-bar .user-area .logout-btn {
+            color: #95a5a6;
+            text-decoration: none;
+            padding: 6px 12px;
+            border-radius: 8px;
+            transition: 0.3s;
+            font-size: 14px;
+        }
+        .top-bar .user-area .logout-btn:hover {
+            background: #fde8e8;
+            color: var(--danger);
+        }
+        
+        .sidebar-toggle {
+            display: none;
+            background: none;
+            border: none;
+            font-size: 22px;
+            color: var(--primary);
+            cursor: pointer;
+        }
         
         @media (max-width: 768px) {
             .sidebar {
-                min-height: auto;
-                margin-bottom: 20px;
+                transform: translateX(-100%);
+                width: 280px;
             }
+            .sidebar.open { transform: translateX(0); }
+            .main-content { margin-left: 0; padding: 15px; }
+            .sidebar-toggle { display: block; }
+            .top-bar .user-area .date { display: none; }
+            .top-bar .user-area .phone { display: none; }
         }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <div class="container-fluid">
-        <div class="row">
-            <!-- Sidebar -->
-            <div class="col-md-3 col-lg-2 px-0 sidebar">
-                <div class="text-center py-4">
-                    <i class="fas fa-tshirt fa-3x text-white"></i>
-                    <h4 class="text-white mt-2">ZenClean</h4>
-                    <p class="text-white-50">Laundry Management</p>
-                </div>
-                <nav class="nav flex-column">
-                    <a class="nav-link" href="/">
-                        <i class="fas fa-tachometer-alt"></i> Dashboard
-                    </a>
-                    <a class="nav-link" href="/orders/">
-                        <i class="fas fa-shopping-cart"></i> Orders
-                    </a>
-                    <a class="nav-link" href="/customers/">
-                        <i class="fas fa-users"></i> Customers
-                    </a>
-                    <a class="nav-link" href="/expenses/">
-                        <i class="fas fa-money-bill-wave"></i> Expenses
-                    </a>
-                    <a class="nav-link" href="/reports/">
-                        <i class="fas fa-chart-line"></i> Reports
-                    </a>
-                    <hr class="bg-light">
-                    <a class="nav-link" href="/admin/logout/">
-                        <i class="fas fa-sign-out-alt"></i> Logout
-                    </a>
-                </nav>
+    <!-- ===== SIDEBAR ===== -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="logo-container">
+                {% load static %}
+                <img src="{% static 'img/zenclean_logo.png' %}" 
+                     alt="{{ company_name }}" 
+                     style="max-width: 250px; max-height: 150px; object-fit: contain;"
+                     onerror="this.style.display='none'; this.parentElement.innerHTML='<i class=\'fas fa-tshirt\' style=\'font-size:40px;color:#3498db;\'></i>'">
+            </div>
+            <h4>{{ company_name }}</h4>
+            <span>Laundry Management</span>
+        </div>
+        
+        <nav class="nav flex-column">
+            <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}">
+                <i class="fas fa-tachometer-alt"></i> Dashboard
+            </a>
+            
+            {% if user.is_authenticated and user.profile or user.is_superuser %}
+                {% if user.profile.is_staff or user.profile.is_manager or user.is_superuser %}
+                <a class="nav-link {% if 'orders' in request.path %}active{% endif %}" href="{% url 'order_list' %}">
+                    <i class="fas fa-shopping-cart"></i> Orders
+                    <span class="badge" id="order-badge">0</span>
+                </a>
+                <a class="nav-link {% if 'customers' in request.path %}active{% endif %}" href="{% url 'customer_list' %}">
+                    <i class="fas fa-users"></i> Customers
+                </a>
+                {% endif %}
+                
+                {% if user.profile.is_manager or user.is_superuser %}
+                <a class="nav-link {% if 'expenses' in request.path %}active{% endif %}" href="{% url 'expense_list' %}">
+                    <i class="fas fa-money-bill-wave"></i> Expenses
+                </a>
+                <a class="nav-link {% if 'reports' in request.path %}active{% endif %}" href="{% url 'reports' %}">
+                    <i class="fas fa-chart-line"></i> Reports
+                </a>
+                <a class="nav-link {% if 'accounting' in request.path %}active{% endif %}" href="{% url 'accounting_dashboard' %}">
+                    <i class="fas fa-book"></i> Accounting
+                </a>
+                <a class="nav-link {% if 'smart' in request.path %}active{% endif %}" href="{% url 'smart_transaction' %}">
+                    <i class="fas fa-magic"></i> Smart Entry
+                </a>
+                {% endif %}
+            {% endif %}
+                <a class="nav-link {% if 'assistant' in request.path %}active{% endif %}" href="{% url 'assistant_dashboard' %}">
+                    <i class="fas fa-robot"></i> AI Assistant
+                </a>
+
+            
+            <hr>
+            
+            <div class="user-info">
+                <div class="name"><i class="fas fa-user-circle"></i> {{ request.user.username }}</div>
+                <div class="role">{% if user.profile.is_manager or user.is_superuser %}👑 Manager{% else %}👤 Staff{% endif %}</div>
             </div>
             
-            <!-- Main Content -->
-            <div class="col-md-9 col-lg-10 px-0">
-                <nav class="navbar-top px-4 py-3">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">{% block page_title %}Dashboard{% endblock %}</h5>
-                        <div>
-                            <i class="fas fa-user-circle"></i> {{ request.user.username }}
-                        </div>
-                    </div>
-                </nav>
-                
-                <div class="p-4">
-                    {% block content %}{% endblock %}
-                </div>
-            </div>
+            <a class="nav-link" href="{% url 'logout' %}">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </nav>
+        
+        <div class="company-footer">
+            <div>{{ company_name }} © 2026</div>
+            <div>{{ company_phone }}</div>
         </div>
     </div>
     
+    <!-- ===== MAIN ===== -->
+    <div class="main-content">
+        <div class="top-bar">
+            <div style="display: flex; align-items: center; gap: 14px;">
+                <button class="sidebar-toggle" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="page-title">{% block page_title %}Dashboard{% endblock %}</div>
+            </div>
+            <div class="user-area">
+                <span class="phone"><i class="fas fa-phone"></i> {{ company_phone }}</span>
+                <span class="date"><i class="fas fa-calendar-alt"></i> {{ today|date:"M d, Y" }}</span>
+                <div class="avatar">{{ request.user.username|first|upper }}</div>
+                <a href="{% url 'logout' %}" class="logout-btn" title="Logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                </a>
+            </div>
+        </div>
+        
+        {% block content %}{% endblock %}
+    </div>
+    
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+    }
+    
+    document.addEventListener('click', function(e) {
+        const sidebar = document.getElementById('sidebar');
+        const btn = document.querySelector('.sidebar-toggle');
+        if (window.innerWidth <= 768 && !sidebar.contains(e.target) && !btn.contains(e.target)) {
+            sidebar.classList.remove('open');
+        }
+    });
+    
+    function updateOrderBadge() {
+        fetch('/api/orders/count/')
+            .then(function(response) { return response.json(); })
+            .then(function(data) {
+                const badge = document.getElementById('order-badge');
+                if (badge) {
+                    badge.textContent = data.pending || 0;
+                }
+            })
+            .catch(function() {});
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        updateOrderBadge();
+    });
+</script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

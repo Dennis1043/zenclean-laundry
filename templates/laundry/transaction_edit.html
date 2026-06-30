@@ -1,0 +1,116 @@
+{% extends 'base/base.html' %}
+{% block title %}Edit Transaction{% endblock %}
+{% block page_title %}Edit Transaction{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="stat-card">
+            <form id="editForm">
+                {% csrf_token %}
+                <input type="hidden" id="transaction_id" value="{{ transaction.id }}">
+                
+                <div class="mb-3">
+                    <label class="form-label">Description *</label>
+                    <input type="text" id="description" name="description" class="form-control" 
+                           value="{{ transaction.description }}" required>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Amount (KSh) *</label>
+                            <input type="number" id="amount" name="amount" class="form-control" 
+                                   value="{{ transaction.amount }}" step="0.01" required>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">Transaction Type</label>
+                            <select id="transaction_type" name="transaction_type" class="form-control">
+                                <option value="purchase" {% if transaction.transaction_type == 'purchase' %}selected{% endif %}>Purchase</option>
+                                <option value="sale" {% if transaction.transaction_type == 'sale' %}selected{% endif %}>Sale</option>
+                                <option value="expense" {% if transaction.transaction_type == 'expense' %}selected{% endif %}>Expense</option>
+                                <option value="payment" {% if transaction.transaction_type == 'payment' %}selected{% endif %}>Payment</option>
+                                <option value="receipt" {% if transaction.transaction_type == 'receipt' %}selected{% endif %}>Receipt</option>
+                                <option value="adjustment" {% if transaction.transaction_type == 'adjustment' %}selected{% endif %}>Adjustment</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Category</label>
+                    <select id="detected_category" name="detected_category" class="form-control">
+                        <option value="asset" {% if transaction.detected_category == 'asset' %}selected{% endif %}>Asset</option>
+                        <option value="liability" {% if transaction.detected_category == 'liability' %}selected{% endif %}>Liability</option>
+                        <option value="equity" {% if transaction.detected_category == 'equity' %}selected{% endif %}>Equity</option>
+                        <option value="revenue" {% if transaction.detected_category == 'revenue' %}selected{% endif %}>Revenue</option>
+                        <option value="expense" {% if transaction.detected_category == 'expense' %}selected{% endif %}>Expense</option>
+                    </select>
+                </div>
+                
+                <div class="mt-4">
+                    <button type="button" class="btn btn-custom" onclick="saveTransaction()">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
+                    <a href="{% url 'transaction_list' %}" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> Cancel
+                    </a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function saveTransaction() {
+    var transactionId = document.getElementById('transaction_id').value;
+    var formData = new FormData(document.getElementById('editForm'));
+    
+    fetch('/smart-transaction/edit/' + transactionId + '/', {
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCookie('csrftoken'),
+        },
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotification(data.message, 'success');
+            window.location.href = '/smart-transaction/list/';
+        } else {
+            showNotification(data.error || 'Error saving transaction', 'error');
+        }
+    })
+    .catch(error => {
+        showNotification('Network error: ' + error, 'error');
+    });
+}
+
+function getCookie(name) {
+    var value = null;
+    if (document.cookie && document.cookie !== '') {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+            var cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                value = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return value;
+}
+
+function showNotification(message, type) {
+    var notification = document.createElement('div');
+    notification.textContent = message;
+    var bgColor = type === 'success' ? '#06d6a0' : '#ef476f';
+    notification.style.cssText = 'position:fixed;bottom:20px;right:20px;padding:12px 20px;background:' + bgColor + ';color:white;border-radius:10px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,0.15);';
+    document.body.appendChild(notification);
+    setTimeout(function() { notification.remove(); }, 3000);
+}
+</script>
+{% endblock %}

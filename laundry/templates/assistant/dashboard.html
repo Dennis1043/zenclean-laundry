@@ -1,0 +1,85 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Accounting Assistant</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f7fa; }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; margin-top: 0; }
+        .stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 15px; margin-bottom: 30px; }
+        .stat-box { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; border-top: 4px solid #4361ee; }
+        .stat-box .number { font-size: 24px; font-weight: bold; color: #2c3e50; }
+        .stat-box .label { color: #6c757d; font-size: 14px; }
+        .stat-box.revenue { border-top-color: #27ae60; }
+        .stat-box.expenses { border-top-color: #e74c3c; }
+        .stat-box.profit { border-top-color: #3498db; }
+        .stat-box.pending { border-top-color: #f39c12; }
+        .input-section { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px; }
+        textarea { width: 100%; height: 80px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 16px; }
+        .row { display: flex; gap: 15px; margin-top: 15px; flex-wrap: wrap; }
+        input[type="number"] { padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 200px; }
+        button { padding: 10px 30px; background: #4361ee; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #3a56d4; }
+        .example-btn { padding: 6px 12px; background: #e9ecef; border: 1px solid #ddd; border-radius: 20px; cursor: pointer; margin-right: 5px; }
+        .example-btn:hover { background: #4361ee; color: white; }
+        .pending-list { margin-top: 20px; }
+        .pending-item { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .badge { padding: 2px 10px; border-radius: 12px; font-size: 12px; }
+        .badge-pending { background: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 AI Accounting Assistant</h1>
+        <p style="color: #6c757d;">Describe your transaction in plain English. The AI will suggest the correct accounting entry.</p>
+
+        <div class="stats">
+            <div class="stat-box revenue">
+                <div class="number">KSh {{ data.total_revenue|floatformat:0|default:"0" }}</div>
+                <div class="label">Revenue</div>
+            </div>
+            <div class="stat-box expenses">
+                <div class="number">KSh {{ data.total_expenses|floatformat:0|default:"0" }}</div>
+                <div class="label">Expenses</div>
+            </div>
+            <div class="stat-box profit">
+                <div class="number">KSh {{ data.net_profit|floatformat:0|default:"0" }}</div>
+                <div class="label">Net Profit</div>
+            </div>
+            <div class="stat-box pending">
+                <div class="number">{{ data.pending_count|default:"0" }}</div>
+                <div class="label">Pending Review</div>
+            </div>
+        </div>
+
+        <div class="input-section">
+            <form method="POST" action="/assistant/process/">
+                {% csrf_token %}
+                <textarea name="text" placeholder="E.g., 'Started a business with 10,000 cash'"></textarea>
+                <div class="row">
+                    <input type="number" name="amount" placeholder="Amount (optional)" step="0.01">
+                    <button type="submit"><i class="fas fa-magic"></i> Analyze</button>
+                </div>
+            </form>
+            <div style="margin-top:10px;">
+                <span style="color:#6c757d;">Try:</span>
+                <button class="example-btn" onclick="document.querySelector('textarea[name=\'text\']').value='Started a business with 10,000 cash';">Started business</button>
+                <button class="example-btn" onclick="document.querySelector('textarea[name=\'text\']').value='Paid water bill 2,000';">Paid water bill</button>
+                <button class="example-btn" onclick="document.querySelector('textarea[name=\'text\']').value='Bought equipment for 50,000';">Bought equipment</button>
+            </div>
+        </div>
+
+        <h2>Pending Transactions</h2>
+        <div class="pending-list">
+            {% for trans in pending_transactions %}
+            <div class="pending-item">
+                <span>{{ trans.raw_text }} <span class="badge badge-pending">{{ trans.get_status_display }}</span></span>
+                <span>KSh {{ trans.amount|floatformat:0 }} <a href="/assistant/review/{{ trans.id }}/" style="margin-left:15px;">Review</a></span>
+            </div>
+            {% empty %}
+            <p style="color:#6c757d;">No pending transactions.</p>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>

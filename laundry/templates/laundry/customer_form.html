@@ -1,6 +1,6 @@
 ﻿{% extends 'base/base.html' %}
-{% block title %}Add Customer{% endblock %}
-{% block page_title %}Add New Customer{% endblock %}
+{% block title %}{{ title }}{% endblock %}
+{% block page_title %}{{ title }}{% endblock %}
 
 {% block content %}
 <div class="row justify-content-center">
@@ -25,19 +25,13 @@
                     <button type="submit" class="btn btn-custom">
                         <i class="fas fa-save"></i> Save Customer
                     </button>
-                    <a href="javascript:window.close()" class="btn btn-secondary">
-                        <i class="fas fa-times"></i> Close
+                    <a href="{% url 'customer_list' %}" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> Cancel
                     </a>
                 </div>
             </form>
         </div>
     </div>
 </div>
-
-<script>
-// If this window was opened from another window, show a message
-if (window.opener) {
-    document.querySelector('.btn-secondary').innerHTML = '<i class="fas fa-times"></i> Close and Return to Order';
-}
-</script>
 {% endblock %}
+

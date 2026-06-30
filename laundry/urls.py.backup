@@ -1,0 +1,76 @@
+﻿from django.urls import path
+from . import views
+
+urlpatterns = [
+    # ========== AUTHENTICATION ==========
+    path('login/', views.user_login, name='login'),
+    path('logout/', views.logout_view, name='logout'),
+    path('register/', views.register, name='register'),
+    
+    # ========== DASHBOARD ==========
+    path('', views.dashboard, name='dashboard'),
+    
+    # ========== ORDERS ==========
+    path('orders/', views.order_list, name='order_list'),
+    path('orders/create/', views.order_create, name='order_create'),
+    path('orders/edit/<int:pk>/', views.order_edit, name='order_edit'),
+    path('orders/status/<int:order_id>/<str:status>/', views.update_order_status, name='update_order_status'),
+    path('orders/payment/<int:order_id>/<str:payment_status>/', views.update_order_payment, name='update_order_payment'),
+    path('orders/mark-all-ready-completed/', views.mark_all_ready_completed, name='mark_all_ready_completed'),
+    
+    # ========== CUSTOMERS ==========
+    path('customers/', views.customer_list, name='customer_list'),
+    path('customers/create/', views.customer_create, name='customer_create'),
+    path('customers/edit/<int:pk>/', views.customer_edit, name='customer_edit'),
+    path('customers/find-by-phone/<str:phone>/', views.find_customer_by_phone, name='find_customer_by_phone'),
+    
+    # ========== EXPENSES ==========
+    path('expenses/', views.expense_list, name='expense_list'),
+    path('expenses/create/', views.expense_create, name='expense_create'),
+    path('expenses/edit/<int:pk>/', views.expense_edit, name='expense_edit'),
+    path('expenses/delete/<int:pk>/', views.expense_delete, name='expense_delete'),
+    
+    # ========== RECEIPTS ==========
+    path('receipt/<int:order_id>/', views.receipt, name='receipt'),
+    path('receipt/pdf/<int:order_id>/', views.receipt_pdf, name='receipt_pdf'),
+    path('receipt/whatsapp/<int:order_id>/', views.receipt_whatsapp, name='receipt_whatsapp'),
+    path('receipt/<int:order_id>/data/', views.receipt_data, name='receipt_data'),
+    
+    # ========== REPORTS ==========
+    path('reports/', views.reports, name='reports'),
+    
+    # ========== ACCOUNTING ==========
+    path('accounting/', views.accounting_dashboard, name='accounting_dashboard'),
+    
+    # ========== ASSETS ==========
+    path('assets/', views.asset_list, name='asset_list'),
+    path('assets/create/', views.asset_create, name='asset_create'),
+    path('assets/edit/<int:pk>/', views.asset_edit, name='asset_edit'),
+    path('assets/delete/<int:pk>/', views.asset_delete, name='asset_delete'),
+    
+    # ========== SMART TRANSACTIONS ==========
+    path('smart-transaction/', views.smart_transaction, name='smart_transaction'),
+    path('smart-transaction/list/', views.transaction_list, name='transaction_list'),
+    path('smart-transaction/view/<int:transaction_id>/', views.view_transaction, name='view_transaction'),
+    path('smart-transaction/confirm/<int:transaction_id>/', views.confirm_transaction, name='confirm_transaction'),
+    path('smart-transaction/edit/<int:transaction_id>/', views.edit_transaction, name='edit_transaction'),
+    
+    # ========== API ENDPOINTS ==========
+    path('api/order-count/', views.api_order_count, name='api_order_count'),
+    path('api/orders/count/', views.api_order_count, name='api_order_count'),
+    path('receipt/<int:order_id>/whatsapp/', views.receipt_whatsapp, name='receipt_whatsapp'),
+    
+    # ========== USER MANAGEMENT ==========
+    path('users/', views.user_management, name='user_management'),
+    path('users/create/', views.create_user, name='create_user'),
+    
+    # ========== ACCOUNTING EXPORTS ==========
+    # PDF Exports (WORKING)
+    path('accounting/export/pdf/', views.export_accounting_pdf, name='export_accounting_pdf'),
+    path('accounting/export/csv/', views.export_accounting_csv, name='export_accounting_csv'),
+    path('accounting/export/all/pdf/', views.export_all_books_pdf, name='export_all_books_pdf'),
+    path('expenses/export/pdf/', views.export_expenses_pdf, name='export_expenses_pdf'),
+    path('accounting/export/excel/', views.export_accounting_excel, name='export_accounting_excel'),
+    # In laundry/urls.py, add this line:
+    path('expenses/export/excel/', views.export_expenses_excel, name='export_expenses_excel'),
+]

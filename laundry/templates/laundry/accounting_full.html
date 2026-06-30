@@ -1,0 +1,806 @@
+﻿{% extends 'base/base.html' %}
+{% load custom_filters %}
+{% block title %}T-Account Accounting System{% endblock %}
+{% block page_title %}Books of Original Entry - T-Account Format{% endblock %}
+
+{% block extra_css %}
+<style>
+    .accounting-container { padding: 20px; }
+    
+    /* Summary Cards */
+    .summary-grid { 
+        display: grid; 
+        grid-template-columns: repeat(6, 1fr); 
+        gap: 15px; 
+        margin-bottom: 25px; 
+    }
+    .summary-card { 
+        background: white; 
+        border-radius: 16px; 
+        padding: 18px; 
+        text-align: center; 
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06); 
+        border-top: 4px solid #4361ee; 
+        transition: transform 0.3s; 
+    }
+    .summary-card:hover { transform: translateY(-3px); }
+    .summary-card.assets { border-top-color: #27ae60; }
+    .summary-card.liabilities { border-top-color: #e74c3c; }
+    .summary-card.equity { border-top-color: #3498db; }
+    .summary-card.revenue { border-top-color: #f39c12; }
+    .summary-card.expenses { border-top-color: #e74c3c; }
+    .summary-card.profit { border-top-color: #6c757d; }
+    .summary-number { 
+        font-size: 26px; 
+        font-weight: 800; 
+        color: #2b2d42; 
+    }
+    .summary-number.profit-positive { color: #27ae60; }
+    .summary-number.profit-negative { color: #e74c3c; }
+    .summary-label { 
+        font-size: 13px; 
+        color: #6c757d; 
+        margin-top: 4px; 
+    }
+    
+    /* T-Account */
+    .t-account-container { 
+        display: grid; 
+        grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); 
+        gap: 25px; 
+        margin: 20px 0; 
+    }
+    .t-account { 
+        background: white; 
+        border-radius: 16px; 
+        padding: 20px; 
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06); 
+        border: 1px solid #e9ecef; 
+    }
+    .t-account-title { 
+        text-align: center; 
+        font-weight: bold; 
+        font-size: 16px; 
+        padding: 10px; 
+        background: #2c3e50; 
+        color: white; 
+        border-radius: 8px 8px 0 0; 
+        margin: -20px -20px 15px -20px; 
+    }
+    .t-account-title .code { 
+        font-weight: normal; 
+        font-size: 12px; 
+        color: #aab; 
+    }
+    .t-grid { 
+        display: grid; 
+        grid-template-columns: 1fr 1fr; 
+        gap: 0; 
+    }
+    .t-debit, .t-credit { padding: 10px; }
+    .t-debit { border-right: 2px solid #ddd; }
+    .t-debit .header { 
+        color: #27ae60; 
+        font-weight: bold; 
+        font-size: 14px; 
+        text-align: center;
+        border-bottom: 2px solid #27ae60;
+        padding-bottom: 5px;
+        margin-bottom: 8px;
+    }
+    .t-credit .header { 
+        color: #e74c3c; 
+        font-weight: bold; 
+        font-size: 14px; 
+        text-align: center;
+        border-bottom: 2px solid #e74c3c;
+        padding-bottom: 5px;
+        margin-bottom: 8px;
+    }
+    .t-entry { 
+        font-size: 12px; 
+        padding: 4px 0; 
+        border-bottom: 1px dashed #eee; 
+        display: flex; 
+        justify-content: space-between; 
+    }
+    .t-total { 
+        font-weight: bold; 
+        border-top: 2px solid #333; 
+        padding-top: 8px; 
+        margin-top: 8px; 
+        display: flex; 
+        justify-content: space-between; 
+    }
+    .t-balance { 
+        background: #f8f9fa; 
+        border-radius: 4px; 
+        padding: 5px 10px; 
+        text-align: center; 
+        margin-top: 10px; 
+        font-weight: bold; 
+        font-size: 14px; 
+    }
+    
+    /* Tab Navigation */
+    .tab-nav { 
+        display: flex; 
+        gap: 8px; 
+        flex-wrap: wrap; 
+        margin-bottom: 25px; 
+        background: white; 
+        padding: 12px; 
+        border-radius: 16px; 
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06); 
+    }
+    .tab-btn { 
+        padding: 10px 20px; 
+        border: none; 
+        border-radius: 12px; 
+        background: transparent; 
+        cursor: pointer; 
+        font-weight: 500; 
+        transition: all 0.3s; 
+        color: #6c757d; 
+        font-size: 14px;
+    }
+    .tab-btn:hover { background: #f0f2f5; }
+    .tab-btn.active { 
+        background: #4361ee; 
+        color: white; 
+    }
+    .tab-btn i { margin-right: 8px; }
+    .tab-content { 
+        display: none; 
+        animation: fadeIn 0.4s ease; 
+    }
+    .tab-content.active { display: block; }
+    
+    @keyframes fadeIn { 
+        from { opacity: 0; transform: translateY(10px); } 
+        to { opacity: 1; transform: translateY(0); } 
+    }
+    
+    .table-custom { 
+        width: 100%; 
+        border-collapse: collapse; 
+    }
+    .table-custom th { 
+        background: #2c3e50; 
+        color: white; 
+        padding: 12px; 
+        text-align: left; 
+        font-weight: 500;
+    }
+    .table-custom td { 
+        padding: 10px 12px; 
+        border-bottom: 1px solid #eee; 
+    }
+    .table-custom tfoot td { 
+        background: #f8f9fa; 
+        font-weight: bold; 
+    }
+    .table-custom tr:hover td {
+        background: #f8f9fa;
+    }
+    .account-type-badge { 
+        display: inline-block; 
+        padding: 2px 10px; 
+        border-radius: 12px; 
+        font-size: 11px; 
+        font-weight: 500; 
+    }
+    .badge-asset { background: #d4edda; color: #155724; }
+    .badge-liability { background: #f8d7da; color: #721c24; }
+    .badge-equity { background: #d1ecf1; color: #0c5460; }
+    .badge-revenue { background: #fff3cd; color: #856404; }
+    .badge-expense { background: #f8d7da; color: #721c24; }
+    
+    .balance-grid { 
+        display: grid; 
+        grid-template-columns: repeat(3, 1fr); 
+        gap: 20px; 
+    }
+    .balance-section { 
+        background: #f8f9fa; 
+        border-radius: 12px; 
+        padding: 15px; 
+    }
+    .balance-section h6 {
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 2px solid #ddd;
+        font-weight: 600;
+    }
+    
+    /* Export Section */
+    .export-section {
+        background: white;
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 25px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .export-section .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    .export-section .header h5 { margin: 0; font-weight: 600; }
+    .btn-group {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .btn-pdf { 
+        background: #dc3545; 
+        color: white; 
+        padding: 8px 18px; 
+        border-radius: 8px; 
+        border: none; 
+        cursor: pointer; 
+        text-decoration: none; 
+        display: inline-block; 
+        font-size: 13px; 
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    .btn-pdf:hover { background: #c82333; color: white; transform: translateY(-2px); }
+    .btn-excel { 
+        background: #28a745; 
+        color: white; 
+        padding: 8px 18px; 
+        border-radius: 8px; 
+        border: none; 
+        cursor: pointer; 
+        text-decoration: none; 
+        display: inline-block; 
+        font-size: 13px; 
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    .btn-excel:hover { background: #218838; color: white; transform: translateY(-2px); }
+    .btn-books { 
+        background: #17a2b8; 
+        color: white; 
+        padding: 8px 18px; 
+        border-radius: 8px; 
+        border: none; 
+        cursor: pointer; 
+        text-decoration: none; 
+        display: inline-block; 
+        font-size: 13px; 
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    .btn-books:hover { background: #138496; color: white; transform: translateY(-2px); }
+    .btn-csv { 
+        background: #6c757d; 
+        color: white; 
+        padding: 8px 18px; 
+        border-radius: 8px; 
+        border: none; 
+        cursor: pointer; 
+        text-decoration: none; 
+        display: inline-block; 
+        font-size: 13px; 
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    .btn-csv:hover { background: #5a6268; color: white; transform: translateY(-2px); }
+    .btn-print { 
+        background: #6c757d; 
+        color: white; 
+        padding: 8px 18px; 
+        border-radius: 8px; 
+        border: none; 
+        cursor: pointer; 
+        text-decoration: none; 
+        display: inline-block; 
+        font-size: 13px; 
+        font-weight: 500;
+        transition: all 0.3s;
+    }
+    .btn-print:hover { background: #5a6268; color: white; transform: translateY(-2px); }
+    
+    @media print {
+        .tab-nav, .no-print { display: none; }
+        .tab-content { display: block !important; }
+        .summary-grid { page-break-after: avoid; }
+        .export-section { display: none; }
+    }
+    
+    @media (max-width: 768px) {
+        .summary-grid { grid-template-columns: repeat(2, 1fr); }
+        .balance-grid { grid-template-columns: 1fr; }
+        .t-account-container { grid-template-columns: 1fr; }
+        .tab-btn { 
+            font-size: 12px; 
+            padding: 8px 12px; 
+        }
+        .btn-group { flex-direction: column; width: 100%; }
+        .btn-group a { text-align: center; }
+        .export-section .header { flex-direction: column; align-items: stretch; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="accounting-container">
+    <!-- Summary Cards -->
+    <div class="summary-grid">
+        <div class="summary-card assets">
+            <div class="summary-number">KSh {{ total_assets|floatformat:0 }}</div>
+            <div class="summary-label">Total Assets</div>
+        </div>
+        <div class="summary-card liabilities">
+            <div class="summary-number">KSh {{ total_liabilities|floatformat:0 }}</div>
+            <div class="summary-label">Total Liabilities</div>
+        </div>
+        <div class="summary-card equity">
+            <div class="summary-number">KSh {{ total_equity|floatformat:0 }}</div>
+            <div class="summary-label">Total Equity</div>
+        </div>
+        <div class="summary-card revenue">
+            <div class="summary-number">KSh {{ total_revenue|floatformat:0 }}</div>
+            <div class="summary-label">Total Revenue</div>
+        </div>
+        <div class="summary-card expenses">
+            <div class="summary-number">KSh {{ total_expenses|floatformat:0 }}</div>
+            <div class="summary-label">Total Expenses</div>
+        </div>
+        <div class="summary-card profit">
+            <div class="summary-number profit-{% if net_profit >= 0 %}positive{% else %}negative{% endif %}">
+                KSh {{ net_profit|floatformat:0 }}
+            </div>
+            <div class="summary-label">Net Profit/Loss</div>
+        </div>
+    </div>
+
+    <!-- ========== EXPORT SECTION - UPDATED ========== -->
+    <div class="export-section">
+        <div class="header">
+            <h5><i class="fas fa-download"></i> Download Reports</h5>
+            <div class="btn-group">
+                <a href="{% url 'export_accountant_package' %}" class="btn btn-primary btn-lg" target="_blank">
+    <i class="fas fa-briefcase"></i> ZenClean accounts PDF
+</a>
+                </a>
+                <a href="{% url 'export_accounting_excel' %}" class="btn-excel" target="_blank">
+                    <i class="fas fa-file-excel"></i> Excel
+                </a>
+                <a href="{% url 'export_accounting_csv' %}" class="btn-csv" target="_blank">
+                    <i class="fas fa-file-csv"></i> CSV
+                </a>
+                <button onclick="window.print()" class="btn-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+        </div>
+        <p style="color: #6c757d; font-size: 13px; margin: 0;">
+            <i class="fas fa-info-circle"></i> 
+            PDF: Trial Balance | Excel: Full Data | All Books: Complete Accounting with All Sections | CSV: Raw Data
+        </p>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+        <button class="tab-btn active" data-tab="taccounts"><i class="fas fa-book"></i> T-Accounts</button>
+        <button class="tab-btn" data-tab="assets"><i class="fas fa-building"></i> Assets</button>
+        
+        <button class="tab-btn" data-tab="equity"><i class="fas fa-chart-pie"></i> Equity</button>
+        <button class="tab-btn" data-tab="journals"><i class="fas fa-list"></i> Journals</button>
+        <button class="tab-btn" data-tab="trial"><i class="fas fa-balance-scale"></i> Trial Balance</button>
+        <button class="tab-btn" data-tab="income"><i class="fas fa-chart-line"></i> Income Statement</button>
+        <button class="tab-btn" data-tab="balance"><i class="fas fa-building"></i> Balance Sheet</button>
+    </div>
+
+    <!-- ==================== TAB 1: T-ACCOUNTS ==================== -->
+    <div class="tab-content active" id="tab-taccounts">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+            <h5 style="margin:0;">T-Accounts</h5>
+            <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                <i class="fas fa-print"></i> Print
+            </button>
+        </div>
+        
+        {% if t_accounts %}
+        <div class="t-account-container">
+            {% for data in t_accounts %}
+            <div class="t-account">
+                <div class="t-account-title">
+                    {{ data.account.account_code }} - {{ data.account.name }}
+                    <span class="code">({{ data.account.get_account_type_display }})</span>
+                </div>
+                <div class="t-grid">
+                    <div class="t-debit">
+                        <div class="header">Debit</div>
+                        {% for entry in data.debit_entries %}
+                        <div class="t-entry">
+                            <span>{{ entry.description|truncatechars:20 }}</span>
+                            <span>{{ entry.debit|floatformat:0 }}</span>
+                        </div>
+                        {% empty %}
+                        <div class="t-entry" style="color:#999;">No debit entries</div>
+                        {% endfor %}
+                        <div class="t-total">
+                            <span>Total</span>
+                            <span>{{ data.total_debit|floatformat:0 }}</span>
+                        </div>
+                    </div>
+                    <div class="t-credit">
+                        <div class="header">Credit</div>
+                        {% for entry in data.credit_entries %}
+                        <div class="t-entry">
+                            <span>{{ entry.description|truncatechars:20 }}</span>
+                            <span>{{ entry.credit|floatformat:0 }}</span>
+                        </div>
+                        {% empty %}
+                        <div class="t-entry" style="color:#999;">No credit entries</div>
+                        {% endfor %}
+                        <div class="t-total">
+                            <span>Total</span>
+                            <span>{{ data.total_credit|floatformat:0 }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="t-balance" style="background:{% if data.account.current_balance > 0 %}#e8f5e9{% else %}#f8f9fa{% endif %};">
+                    Balance: KSh {{ data.account.current_balance|floatformat:0 }} ({{ data.account.get_normal_balance_display }})
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="alert alert-info text-center py-5">
+            <i class="fas fa-inbox fa-3x mb-3 d-block text-muted"></i>
+            <h5>No Transactions Yet</h5>
+            <p>Start by adding transactions using the <a href="{% url 'smart_transaction' %}">Smart Transaction Entry</a> or create orders.</p>
+            <a href="{% url 'smart_transaction' %}" class="btn btn-custom mt-2">
+                <i class="fas fa-plus"></i> Add Your First Transaction
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- ==================== TAB 2: ASSETS ==================== -->
+    <div class="tab-content" id="tab-assets">
+        <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h5 style="margin:0;">Asset Register</h5>
+                <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table-custom">
+                    <thead>
+                        <tr>
+                            <th>Asset Code</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Purchase Date</th>
+                            <th>Purchase Price</th>
+                            <th>Current Value</th>
+                            <th>Location</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for asset in assets_list %}
+                        <tr>
+                            <td><strong>{{ asset.asset_code }}</strong></td>
+                            <td>{{ asset.name }}</td>
+                            <td>{{ asset.get_asset_type_display }}</td>
+                            <td>{{ asset.purchase_date|date:"Y-m-d" }}</td>
+                            <td>KSh {{ asset.purchase_price|floatformat:0 }}</td>
+                            <td>KSh {{ asset.current_value|floatformat:0 }}</td>
+                            <td>{{ asset.location|default:"-" }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="7" class="text-center py-4">No assets recorded</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    
+    <!-- ==================== TAB 4: EQUITY ==================== -->
+    <div class="tab-content" id="tab-equity">
+        <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h5 style="margin:0;">Equity Register</h5>
+                <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table-custom">
+                    <thead>
+                        <tr>
+                            <th>Equity Code</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Owner</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for equity in equity_list %}
+                        <tr>
+                            <td><strong>{{ equity.equity_code }}</strong></td>
+                            <td>{{ equity.name }}</td>
+                            <td>{{ equity.get_equity_type_display }}</td>
+                            <td>KSh {{ equity.amount|floatformat:0 }}</td>
+                            <td>{{ equity.owner }}</td>
+                            <td>{{ equity.description|truncatechars:30 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="text-center py-4">No equity recorded</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== TAB 5: JOURNALS ==================== -->
+    <div class="tab-content" id="tab-journals">
+        <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h5 style="margin:0;">Books of Original Entry</h5>
+                <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table-custom">
+                    <thead>
+                        <tr>
+                            <th>Entry #</th>
+                            <th>Date</th>
+                            <th>Book</th>
+                            <th>Description</th>
+                            <th>Reference</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for journal in journals %}
+                        <tr>
+                            <td><strong>{{ journal.entry_number }}</strong></td>
+                            <td>{{ journal.created_at|date:"Y-m-d H:i" }}</td>
+                            <td>{{ journal.get_journal_type_display }}</td>
+                            <td>{{ journal.description|truncatechars:50 }}</td>
+                            <td>{{ journal.reference|default:"-" }}</td>
+                            <td>KSh {{ journal.total_amount|floatformat:0 }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="6" class="text-center py-4">No journal entries yet</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== TAB 6: TRIAL BALANCE ==================== -->
+    <div class="tab-content" id="tab-trial">
+        <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h5 style="margin:0;">Trial Balance</h5>
+                <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            {% if trial_balance %}
+            <div class="table-responsive">
+                <table class="table-custom">
+                    <thead>
+                        <tr>
+                            <th>Account</th>
+                            <th>Type</th>
+                            <th>Debit (KSh)</th>
+                            <th>Credit (KSh)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in trial_balance %}
+                        <tr>
+                            <td>{{ item.account.name }}</td>
+                            <td><span class="account-type-badge badge-{{ item.account.account_type }}">{{ item.account.get_account_type_display }}</span></td>
+                            <td>{% if item.debit > 0 %}KSh {{ item.debit|floatformat:2 }}{% else %}-{% endif %}</td>
+                            <td>{% if item.credit > 0 %}KSh {{ item.credit|floatformat:2 }}{% else %}-{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr>
+                            <td colspan="2"><strong>Total</strong></td>
+                            <td><strong>KSh {{ total_tb_debits|floatformat:2 }}</strong></td>
+                            <td><strong>KSh {{ total_tb_credits|floatformat:2 }}</strong></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+            {% if total_tb_debits == total_tb_credits %}
+            <div class="alert alert-success mt-3">
+                <i class="fas fa-check-circle"></i> ✅ Trial Balance is BALANCED!
+            </div>
+            {% else %}
+            <div class="alert alert-danger mt-3">
+                <i class="fas fa-exclamation-triangle"></i> ⚠️ Trial Balance NOT BALANCED! 
+                Difference: KSh {{ total_tb_debits|add:total_tb_credits|floatformat:2 }}
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="alert alert-info text-center py-5">
+                <i class="fas fa-balance-scale fa-3x mb-3 d-block text-muted"></i>
+                <h5>No Trial Balance Data</h5>
+                <p>Start adding transactions to see your trial balance.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ==================== TAB 7: INCOME STATEMENT ==================== -->
+    <div class="tab-content" id="tab-income">
+        <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h5 style="margin:0;">Income Statement</h5>
+                <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            {% if revenue_accounts or expense_accounts %}
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 style="color:#27ae60;">Revenue</h6>
+                    <table class="table-custom">
+                        <tbody>
+                            {% for account in revenue_accounts %}
+                            <tr><td>{{ account.name }}</td><td class="text-end">KSh {{ account.current_balance|floatformat:2 }}</td></tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center">No revenue</td></tr>
+                            {% endfor %}
+                            <tr style="background:#e8f5e9;">
+                                <td><strong>Total Revenue</strong></td>
+                                <td class="text-end"><strong>KSh {{ total_revenue_amount|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6 style="color:#e74c3c;">Expenses</h6>
+                    <table class="table-custom">
+                        <tbody>
+                            {% for account in expense_accounts %}
+                            <tr><td>{{ account.name }}</td><td class="text-end">KSh {{ account.current_balance|floatformat:2 }}</td></tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center">No expenses</td></tr>
+                            {% endfor %}
+                            <tr style="background:#f8d7da;">
+                                <td><strong>Total Expenses</strong></td>
+                                <td class="text-end"><strong>KSh {{ total_expense_amount|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="alert alert-{% if net_income >= 0 %}success{% else %}danger{% endif %} mt-3 text-center">
+                <h4><strong>Net Income: KSh {{ net_income|floatformat:2 }}</strong></h4>
+            </div>
+            {% else %}
+            <div class="alert alert-info text-center py-5">
+                <i class="fas fa-chart-line fa-3x mb-3 d-block text-muted"></i>
+                <h5>No Income Data</h5>
+                <p>Start adding transactions to see your income statement.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- ==================== TAB 8: BALANCE SHEET ==================== -->
+    <div class="tab-content" id="tab-balance">
+        <div style="background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; flex-wrap:wrap; gap:10px;">
+                <h5 style="margin:0;">Balance Sheet</h5>
+                <button onclick="window.print()" class="btn btn-secondary btn-sm no-print">
+                    <i class="fas fa-print"></i> Print
+                </button>
+            </div>
+            {% if asset_accounts or liability_accounts or equity_accounts %}
+            <div class="balance-grid">
+                <div class="balance-section">
+                    <h6 style="color:#27ae60;">Assets</h6>
+                    <table class="table-custom">
+                        <tbody>
+                            {% for account in asset_accounts %}
+                            <tr><td>{{ account.name }}</td><td class="text-end">KSh {{ account.current_balance|floatformat:2 }}</td></tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center">No assets</td></tr>
+                            {% endfor %}
+                            <tr style="background:#e8f5e9;">
+                                <td><strong>Total Assets</strong></td>
+                                <td class="text-end"><strong>KSh {{ total_assets|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="balance-section">
+                    <h6 style="color:#e74c3c;">Liabilities</h6>
+                    <table class="table-custom">
+                        <tbody>
+                            {% for account in liability_accounts %}
+                            <tr><td>{{ account.name }}</td><td class="text-end">KSh {{ account.current_balance|floatformat:2 }}</td></tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center">No liabilities</td></tr>
+                            {% endfor %}
+                            <tr style="background:#f8d7da;">
+                                <td><strong>Total Liabilities</strong></td>
+                                <td class="text-end"><strong>KSh {{ total_liabilities|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="balance-section">
+                    <h6 style="color:#3498db;">Equity</h6>
+                    <table class="table-custom">
+                        <tbody>
+                            {% for account in equity_accounts %}
+                            <tr><td>{{ account.name }}</td><td class="text-end">KSh {{ account.current_balance|floatformat:2 }}</td></tr>
+                            {% empty %}
+                            <tr><td colspan="2" class="text-center">No equity</td></tr>
+                            {% endfor %}
+                            <tr style="background:#d1ecf1;">
+                                <td><strong>Total Equity</strong></td>
+                                <td class="text-end"><strong>KSh {{ total_equity|floatformat:2 }}</strong></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% if total_assets == total_liabilities|add:total_equity %}
+            <div class="alert alert-success mt-3 text-center">
+                ✅ Balance Sheet is BALANCED! (Assets = Liabilities + Equity)
+            </div>
+            {% else %}
+            <div class="alert alert-danger mt-3 text-center">
+                ⚠️ Balance Sheet NOT BALANCED! Difference: KSh {{ total_assets|add:total_liabilities|add:total_equity|floatformat:2 }}
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="alert alert-info text-center py-5">
+                <i class="fas fa-building fa-3x mb-3 d-block text-muted"></i>
+                <h5>No Balance Sheet Data</h5>
+                <p>Start adding transactions to see your balance sheet.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.tab-btn').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-content').forEach(function(t) {
+                t.classList.remove('active');
+            });
+            this.classList.add('active');
+            var tabId = this.getAttribute('data-tab');
+            var targetTab = document.getElementById('tab-' + tabId);
+            if (targetTab) {
+                targetTab.classList.add('active');
+            }
+        });
+    });
+</script>
+{% endblock %}

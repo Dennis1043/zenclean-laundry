@@ -1,26 +1,224 @@
-{% extends 'base/base.html' %}
+﻿{% extends 'base/base.html' %}
 {% block title %}{{ title }}{% endblock %}
 {% block page_title %}{{ title }}{% endblock %}
 
+{% block extra_css %}
+<style>
+    .detection-card {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 15px 20px;
+        margin: 15px 0;
+        border-left: 4px solid #4361ee;
+        display: none;
+    }
+    .detection-card.show {
+        display: block;
+        animation: fadeIn 0.3s ease;
+    }
+    .detection-card .detection-label {
+        font-size: 12px;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .detection-card .detection-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+    .detection-card .detection-account {
+        font-size: 14px;
+        color: #27ae60;
+    }
+    .detection-card .detection-actions {
+        margin-top: 10px;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .entry-options {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 8px;
+        margin: 10px 0;
+    }
+    .entry-option {
+        padding: 10px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.3s;
+        text-align: center;
+        background: white;
+    }
+    .entry-option:hover {
+        border-color: #4361ee;
+        transform: translateY(-2px);
+    }
+    .entry-option.selected {
+        border-color: #27ae60;
+        background: #e8f5e9;
+    }
+    .entry-option .option-type {
+        font-weight: 600;
+        font-size: 14px;
+    }
+    .entry-option .option-desc {
+        font-size: 11px;
+        color: #6c757d;
+    }
+    .btn-sm {
+        padding: 4px 12px;
+        font-size: 12px;
+        border-radius: 6px;
+        border: none;
+        cursor: pointer;
+    }
+    .btn-success-sm { background: #27ae60; color: white; }
+    .btn-warning-sm { background: #f39c12; color: white; }
+    
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .mt-4 {
+        margin-top: 20px;
+    }
+    .btn {
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.3s;
+        text-decoration: none;
+        display: inline-block;
+    }
+    .btn-custom {
+        background: #4361ee;
+        color: white;
+    }
+    .btn-custom:hover {
+        background: #3a56d4;
+        transform: translateY(-2px);
+    }
+    .btn-primary {
+        background: #27ae60;
+        color: white;
+    }
+    .btn-primary:hover {
+        background: #219a52;
+        transform: translateY(-2px);
+    }
+    .btn-secondary {
+        background: #6c757d;
+        color: white;
+    }
+    .btn-secondary:hover {
+        background: #5a6268;
+        transform: translateY(-2px);
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-6">
+    <div class="col-md-8">
         <div class="stat-card">
-            <form method="post">
+            <h5><i class="fas fa-{% if is_edit %}edit{% else %}magic{% endif %}"></i> {% if is_edit %}Edit{% else %}Smart{% endif %} Expense Entry</h5>
+            <p class="text-muted">{% if is_edit %}Edit the expense details.{% else %}Describe your expense naturally. The system will detect the type and suggest the accounting entry.{% endif %}</p>
+            
+            <form method="post" id="expenseForm">
                 {% csrf_token %}
-                {% for field in form %}
+                
                 <div class="mb-3">
-                    <label for="{{ field.id_for_label }}" class="form-label">{{ field.label }}</label>
-                    {{ field }}
-                    {% for error in field.errors %}
-                    <div class="alert alert-danger mt-1">{{ error }}</div>
-                    {% endfor %}
+                    <label class="form-label">Expense Description *</label>
+                    <input type="text" name="description" id="description" class="form-control" 
+                           value="{{ expense.description|default:'' }}"
+                           placeholder="e.g., Paid water bill for the shop" required>
+                    <small class="text-muted">Describe what the expense is for</small>
                 </div>
-                {% endfor %}
+                
+                <div class="mb-3">
+                    <label class="form-label">Amount (KSh) *</label>
+                    <input type="number" name="amount" id="amount" class="form-control" 
+                           value="{{ expense.amount|default:'' }}"
+                           placeholder="e.g., 2000" required min="1">
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Category</label>
+                    <select name="category" id="category" class="form-control">
+                        <option value="">Auto-detect</option>
+                        <option value="detergent" {% if expense.category == 'detergent' %}selected{% endif %}>Detergent</option>
+                        <option value="water" {% if expense.category == 'water' %}selected{% endif %}>Water</option>
+                        <option value="electricity" {% if expense.category == 'electricity' %}selected{% endif %}>Electricity</option>
+                        <option value="maintenance" {% if expense.category == 'maintenance' %}selected{% endif %}>Maintenance</option>
+                        <option value="salary" {% if expense.category == 'salary' %}selected{% endif %}>Salary</option>
+                        <option value="rent" {% if expense.category == 'rent' %}selected{% endif %}>Rent</option>
+                        <option value="asset_purchase" {% if expense.category == 'asset_purchase' %}selected{% endif %}>Asset Purchase</option>
+                        <option value="other" {% if expense.category == 'other' %}selected{% endif %}>Other</option>
+                    </select>
+                    <small class="text-muted">Select "Asset Purchase" for buying equipment, machinery, vehicles, etc.</small>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">Notes</label>
+                    <textarea name="notes" id="notes" class="form-control" rows="2" 
+                              placeholder="Additional details...">{{ expense.notes|default:'' }}</textarea>
+                </div>
+                
+                <input type="hidden" name="entry_type" id="entry_type" value="expense">
+                
+                <!-- Detection Card -->
+                <div class="detection-card" id="detectionCard">
+                    <div class="detection-label">📊 System Analysis</div>
+                    <div class="detection-value" id="detectedType">Water Expense</div>
+                    <div class="detection-account" id="detectedAccount">
+                        <i class="fas fa-arrow-right"></i> Debit: <strong>Water Expense</strong> | Credit: <strong>Cash</strong>
+                    </div>
+                    <div style="margin-top: 8px; font-size: 13px; color: #6c757d;">
+                        <span id="detectionConfidence">Confidence: 95%</span>
+                    </div>
+                    
+                    <!-- Entry Options -->
+                    <div class="entry-options" id="entryOptions">
+                        <div class="entry-option selected" data-type="expense" onclick="selectEntry(this)">
+                            <div class="option-type">💸 Expense</div>
+                            <div class="option-desc">Record as expense</div>
+                        </div>
+                        <div class="entry-option" data-type="asset" onclick="selectEntry(this)">
+                            <div class="option-type">🏗️ Asset</div>
+                            <div class="option-desc">Record as fixed asset</div>
+                        </div>
+                        <div class="entry-option" data-type="liability" onclick="selectEntry(this)">
+                            <div class="option-type">📋 Liability</div>
+                            <div class="option-desc">Record as liability</div>
+                        </div>
+                        <div class="entry-option" data-type="prepaid" onclick="selectEntry(this)">
+                            <div class="option-type">⏳ Prepaid</div>
+                            <div class="option-desc">Record as prepaid expense</div>
+                        </div>
+                    </div>
+                    
+                    <div class="detection-actions">
+                        <button type="button" class="btn btn-success-sm" onclick="setEntryType()">
+                            <i class="fas fa-check"></i> Use This Entry Type
+                        </button>
+                        <button type="button" class="btn btn-warning-sm" onclick="analyzeExpense()">
+                            <i class="fas fa-sync"></i> Re-analyze
+                        </button>
+                    </div>
+                </div>
                 
                 <div class="mt-4">
-                    <button type="submit" class="btn btn-custom">
-                        <i class="fas fa-save"></i> Save Expense
+                    <button type="button" class="btn btn-custom" onclick="analyzeExpense()">
+                        <i class="fas fa-robot"></i> Analyze Expense
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="saveBtn">
+                        <i class="fas fa-save"></i> Save
                     </button>
                     <a href="{% url 'expense_list' %}" class="btn btn-secondary">
                         <i class="fas fa-times"></i> Cancel
@@ -28,18 +226,171 @@
                 </div>
             </form>
         </div>
-        
-        <div class="stat-card mt-3">
-            <h6><i class="fas fa-lightbulb"></i> Expense Categories</h6>
-            <ul class="mb-0">
-                <li><strong>Detergent:</strong> Washing powder, softener, bleach</li>
-                <li><strong>Water:</strong> Water bills</li>
-                <li><strong>Electricity:</strong> Power bills for machines</li>
-                <li><strong>Maintenance:</strong> Machine repairs</li>
-                <li><strong>Salary:</strong> Staff payments</li>
-                <li><strong>Rent:</strong> Business premises</li>
-            </ul>
-        </div>
     </div>
 </div>
+
+<script>
+    var selectedEntry = 'expense';
+    
+    function analyzeExpense() {
+        var description = document.getElementById('description').value;
+        var amount = document.getElementById('amount').value;
+        var category = document.getElementById('category').value;
+        
+        if (!description || !amount) {
+            document.getElementById('detectionCard').classList.remove('show');
+            return;
+        }
+        
+        var analysis = detectExpenseType(description, amount, category);
+        
+        document.getElementById('detectedType').textContent = analysis.displayName;
+        document.getElementById('detectedAccount').innerHTML = 
+            '<i class="fas fa-arrow-right"></i> Debit: <strong>' + analysis.debit + '</strong> | Credit: <strong>' + analysis.credit + '</strong>';
+        document.getElementById('detectionConfidence').textContent = 'Confidence: ' + analysis.confidence + '%';
+        
+        var options = document.querySelectorAll('.entry-option');
+        options.forEach(function(opt) {
+            opt.classList.remove('selected');
+            if (opt.dataset.type === analysis.defaultEntry) {
+                opt.classList.add('selected');
+                selectedEntry = analysis.defaultEntry;
+            }
+        });
+        
+        document.getElementById('detectionCard').classList.add('show');
+    }
+    
+    function detectExpenseType(description, amount, category) {
+        var desc = description.toLowerCase();
+        var cat = category || '';
+        
+        if (cat === 'asset_purchase' || desc.includes('purchase') || desc.includes('buy') || desc.includes('machine') || desc.includes('equipment')) {
+            return {
+                category: 'asset_purchase',
+                displayName: 'Asset Purchase',
+                debit: 'Fixed Asset',
+                credit: 'Cash',
+                defaultEntry: 'asset',
+                confidence: 90
+            };
+        }
+        
+        if (cat === 'salary' || desc.includes('salary') || desc.includes('wage') || desc.includes('payroll')) {
+            return {
+                category: 'salary',
+                displayName: 'Salary Expense',
+                debit: 'Salary Expense',
+                credit: 'Cash',
+                defaultEntry: 'expense',
+                confidence: 95
+            };
+        }
+        
+        if (cat === 'electricity' || desc.includes('electricity') || desc.includes('power') || desc.includes('light')) {
+            return {
+                category: 'electricity',
+                displayName: 'Electricity Expense',
+                debit: 'Electricity Expense',
+                credit: 'Cash',
+                defaultEntry: 'expense',
+                confidence: 95
+            };
+        }
+        
+        if (cat === 'water' || desc.includes('water')) {
+            return {
+                category: 'water',
+                displayName: 'Water Expense',
+                debit: 'Water Expense',
+                credit: 'Cash',
+                defaultEntry: 'expense',
+                confidence: 95
+            };
+        }
+        
+        if (cat === 'rent' || desc.includes('rent')) {
+            return {
+                category: 'rent',
+                displayName: 'Rent Expense',
+                debit: 'Rent Expense',
+                credit: 'Cash',
+                defaultEntry: 'expense',
+                confidence: 95
+            };
+        }
+        
+        if (cat === 'detergent' || desc.includes('detergent') || desc.includes('soap')) {
+            return {
+                category: 'detergent',
+                displayName: 'Detergent Expense',
+                debit: 'Detergent Expense',
+                credit: 'Cash',
+                defaultEntry: 'expense',
+                confidence: 90
+            };
+        }
+        
+        if (cat === 'maintenance' || desc.includes('maintenance') || desc.includes('repair')) {
+            return {
+                category: 'maintenance',
+                displayName: 'Maintenance Expense',
+                debit: 'Maintenance Expense',
+                credit: 'Cash',
+                defaultEntry: 'expense',
+                confidence: 90
+            };
+        }
+        
+        if (desc.includes('loan') || desc.includes('borrow') || desc.includes('payable')) {
+            return {
+                category: 'other',
+                displayName: 'Liability',
+                debit: 'Cash',
+                credit: 'Accounts Payable',
+                defaultEntry: 'liability',
+                confidence: 85
+            };
+        }
+        
+        if (desc.includes('prepaid') || desc.includes('advance')) {
+            return {
+                category: 'other',
+                displayName: 'Prepaid Expense',
+                debit: 'Prepaid Expense',
+                credit: 'Cash',
+                defaultEntry: 'prepaid',
+                confidence: 80
+            };
+        }
+        
+        return {
+            category: 'other',
+            displayName: 'General Expense',
+            debit: 'General Expense',
+            credit: 'Cash',
+            defaultEntry: 'expense',
+            confidence: 60
+        };
+    }
+    
+    function selectEntry(element) {
+        document.querySelectorAll('.entry-option').forEach(function(opt) {
+            opt.classList.remove('selected');
+        });
+        element.classList.add('selected');
+        selectedEntry = element.dataset.type;
+    }
+    
+    function setEntryType() {
+        document.getElementById('entry_type').value = selectedEntry;
+        alert('Entry type set to: ' + selectedEntry.toUpperCase());
+    }
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        {% if is_edit %}
+        analyzeExpense();
+        {% endif %}
+    });
+</script>
 {% endblock %}

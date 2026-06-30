@@ -1,0 +1,55 @@
+{% extends 'base/base.html' %}
+{% block title %}Transactions{% endblock %}
+{% block page_title %}Transaction History{% endblock %}
+
+{% block content %}
+<div class="stat-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 style="margin:0;">All Transactions</h5>
+        <a href="{% url 'smart_transaction' %}" class="btn btn-custom btn-sm">
+            <i class="fas fa-plus"></i> New Transaction
+        </a>
+    </div>
+    
+    <div class="table-responsive">
+        <table class="table table-custom">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for transaction in transactions %}
+                <tr>
+                    <td>{{ transaction.created_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ transaction.description|truncatechars:50 }}</td>
+                    <td>{{ transaction.get_transaction_type_display }}</td>
+                    <td>KSh {{ transaction.amount|floatformat:0 }}</td>
+                    <td>{{ transaction.detected_category|default:"-" }}</td>
+                    <td>
+                        {% if transaction.verified %}
+                        <span class="badge bg-success">✅ Verified</span>
+                        {% else %}
+                        <span class="badge bg-warning">⏳ Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'view_transaction' transaction.id %}" class="btn btn-sm btn-info">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="7" class="text-center py-4">No transactions yet</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

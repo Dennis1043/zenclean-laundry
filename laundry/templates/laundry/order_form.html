@@ -59,24 +59,37 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
                 
                 <!-- Customer Fields -->
-                <div class="mb-3">
-                    <label class="form-label">Customer Phone Number *</label>
-                    <input type="text" id="customer_phone" name="customer_phone" class="form-control" placeholder="e.g., 0712345678" required>
-                    <small class="text-muted">Enter phone number - existing customer will be loaded automatically</small>
-                </div>
-                
-                <div class="mb-3">
-                    <label class="form-label">Customer Name *</label>
-                    <input type="text" id="customer_name" name="customer_name" class="form-control" placeholder="Customer full name" required>
-                    <input type="hidden" id="existing_customer_id" name="existing_customer_id" value="">
-                </div>
-                
-                <div class="mb-3">
-                    <label class="form-label">Customer Location</label>
-                    <input type="text" id="customer_location" name="customer_location" class="form-control" placeholder="e.g., Westlands, CBD">
-                </div>
-                
-                <hr>
+<div class="mb-3">
+    <label class="form-label">Customer Phone Number *</label>
+    <input type="text" id="customer_phone" name="customer_phone" class="form-control" placeholder="e.g., 0712345678" required>
+    <small class="text-muted">Enter phone number - existing customer will be loaded automatically</small>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Customer Name *</label>
+    <input type="text" id="customer_name" name="customer_name" class="form-control" placeholder="Customer full name" required>
+    <input type="hidden" id="existing_customer_id" name="existing_customer_id" value="">
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Customer Location</label>
+    <input type="text" id="customer_location" name="customer_location" class="form-control" placeholder="e.g., Westlands, CBD">
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Apartment/Building Name</label>
+    <input type="text" id="customer_apartment" name="customer_apartment" class="form-control" placeholder="e.g., Park View Apartments">
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Floor</label>
+    <input type="text" id="customer_floor" name="customer_floor" class="form-control" placeholder="e.g., 3rd Floor">
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Door/House Number</label>
+    <input type="text" id="customer_door" name="customer_door" class="form-control" placeholder="e.g., House 12, Door 5">
+</div>
                 
                 <!-- Order Fields -->
                 <div class="mb-3">
@@ -143,3 +156,4 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
 </div>
 {% endblock %}
+

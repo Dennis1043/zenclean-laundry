@@ -1,13 +1,16 @@
 ﻿<!DOCTYPE html>
 <html>
 <head>
-    <title>ZenClean Laundry - Receipt {{ order.order_number }}</title>
+    <title>{{ company_name }} Laundry - Receipt {{ order.order_number }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
-            font-family: Arial, sans-serif;
-            width: 300px;
+            font-family: 'Courier New', monospace;
+            width: 350px;
             margin: 0 auto;
             padding: 20px;
+            font-size: 14px;
         }
         .header {
             text-align: center;
@@ -18,120 +21,329 @@
         .business-name {
             font-size: 24px;
             font-weight: bold;
+            letter-spacing: 2px;
+            color: #2c3e50;
+        }
+        .business-tagline {
+            font-size: 11px;
+            color: #7f8c8d;
+            margin-top: 2px;
+            letter-spacing: 1px;
+        }
+        .business-address {
+            font-size: 11px;
+            color: #666;
+            margin-top: 2px;
         }
         .receipt-title {
             text-align: center;
-            font-size: 18px;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 8px 0;
+            letter-spacing: 3px;
+            color: #2c3e50;
+        }
+        .divider {
+            border-top: 1px dashed #999;
             margin: 10px 0;
         }
-        .details {
-            margin: 20px 0;
+        .divider-thick {
+            border-top: 2px solid #333;
+            margin: 12px 0;
         }
         .row {
             display: flex;
             justify-content: space-between;
-            margin: 8px 0;
+            padding: 3px 0;
         }
         .total {
             font-weight: bold;
-            border-top: 1px dashed #333;
+            font-size: 18px;
+            border-top: 2px solid #333;
             padding-top: 10px;
             margin-top: 10px;
         }
+        .customer-section {
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .customer-section .row {
+            padding: 2px 0;
+            font-size: 12px;
+        }
+        .label {
+            color: #7f8c8d;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .value {
+            font-weight: 500;
+        }
         .footer {
             text-align: center;
-            margin-top: 30px;
-            font-size: 12px;
-            color: #666;
-        }
-        @media print {
-            body { margin: 0; padding: 10px; }
-            .no-print { display: none; }
-        }
-        .no-print {
-            text-align: center;
             margin-top: 20px;
+            padding-top: 15px;
+            border-top: 2px solid #2c3e50;
         }
-        button {
+        .footer .brand {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            letter-spacing: 2px;
+        }
+        .footer .tagline {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 4px;
+        }
+        .footer .contact {
+            font-size: 12px;
+            color: #555;
+            margin-top: 6px;
+        }
+        .footer .contact i {
+            margin: 0 4px;
+        }
+        .footer .social {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #7f8c8d;
+        }
+        .footer .thankyou {
+            font-size: 14px;
+            font-weight: bold;
+            color: #27ae60;
+            margin-top: 8px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .status-paid { background: #27ae60; color: white; }
+        .status-unpaid { background: #e74c3c; color: white; }
+        .status-partial { background: #f39c12; color: white; }
+        .no-print { text-align: center; margin-top: 20px; }
+        .no-print button {
             background: #3498db;
             color: white;
             border: none;
-            padding: 10px 20px;
+            padding: 10px 25px;
             cursor: pointer;
             border-radius: 5px;
+            margin: 5px;
+            font-size: 14px;
+            transition: all 0.3s;
         }
-        button:hover {
-            background: #2980b9;
+        .no-print button:hover {
+            transform: scale(1.05);
+            opacity: 0.9;
+        }
+        .btn-whatsapp {
+            background: #25D366 !important;
+        }
+        .btn-whatsapp:hover {
+            background: #1da851 !important;
+        }
+        .btn-print {
+            background: #2c3e50 !important;
+        }
+        .btn-close {
+            background: #e74c3c !important;
+        }
+        .whatsapp-icon {
+            font-size: 18px;
+            margin-right: 8px;
+        }
+        @media print {
+            .no-print { display: none; }
+            body { margin: 0; padding: 10px; }
+            .footer { border-top: 2px solid #333; }
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="business-name">ZenClean Laundry</div>
-        <div>Quality Dry Cleaning & Laundry</div>
-        <div>Tel: 0712345678</div>
+        <div class="business-name">🧺 {{ company_name|default:"ZenClean" }}</div>
+        <div class="business-tagline">Quality Dry Cleaning & Laundry</div>
+        <div class="business-address">📍 {{ company_address|default:"Nairobi, Kenya" }}</div>
     </div>
     
     <div class="receipt-title">SALES RECEIPT</div>
     
-    <div class="details">
+    <!-- Order Info -->
+    <div class="row">
+        <span>Order #</span>
+        <strong>{{ order.order_number }}</strong>
+    </div>
+    <div class="row">
+        <span>Date</span>
+        <span>{{ order.created_at|date:"Y-m-d H:i" }}</span>
+    </div>
+    <div class="row">
+        <span>Status</span>
+        <span>
+            <span class="status-badge status-{{ order.payment_status }}">
+                {{ order.get_payment_status_display }}
+            </span>
+        </span>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <!-- Customer Details -->
+    <div class="customer-section">
+        <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">👤 Customer Details</div>
         <div class="row">
-            <span>Order #:</span>
-            <strong>{{ order.order_number }}</strong>
+            <span class="label">Name</span>
+            <span class="value">{{ order.customer.name }}</span>
         </div>
         <div class="row">
-            <span>Date:</span>
-            <span>{{ order.created_at|date:"Y-m-d H:i" }}</span>
+            <span class="label">Phone</span>
+            <span class="value">{{ order.customer.phone }}</span>
         </div>
         <div class="row">
-            <span>Customer:</span>
-            <span>{{ order.customer.name }}</span>
+            <span class="label">Location</span>
+            <span class="value">{{ order.customer.location|default:"-" }}</span>
         </div>
         <div class="row">
-            <span>Phone:</span>
-            <span>{{ order.customer.phone }}</span>
-        </div>
-        {% if order.items_description %}
-        <div class="row">
-            <span>Items:</span>
-            <span>{{ order.items_description|truncatechars:30 }}</span>
-        </div>
-        {% endif %}
-        <div class="row">
-            <span>Weight:</span>
-            <span>{{ order.weight_kg }} kg</span>
+            <span class="label">Apartment/Building</span>
+            <span class="value">{{ order.customer.apartment_name|default:"-" }}</span>
         </div>
         <div class="row">
-            <span>Rate:</span>
-            <span>KSh {{ order.price_per_kg }}/kg</span>
-        </div>
-        <div class="row total">
-            <span>TOTAL:</span>
-            <strong>KSh {{ order.total_amount|floatformat:0 }}</strong>
+            <span class="label">Floor</span>
+            <span class="value">{{ order.customer.floor|default:"-" }}</span>
         </div>
         <div class="row">
-            <span>Paid:</span>
-            <span>KSh {{ order.paid_amount|floatformat:0 }}</span>
-        </div>
-        <div class="row">
-            <span>Balance:</span>
-            <span>KSh {% widthratio order.total_amount 1 0 %}</span>
-        </div>
-        <div class="row">
-            <span>Status:</span>
-            <span>{{ order.get_status_display }}</span>
+            <span class="label">Door/House No.</span>
+            <span class="value">{{ order.customer.door_number|default:"-" }}</span>
         </div>
     </div>
     
+    <div class="divider"></div>
+    
+    <!-- Order Details -->
+    <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">📦 Order Details</div>
+    {% if order.items_description %}
+    <div class="row">
+        <span class="label">Items</span>
+        <span class="value">{{ order.items_description|truncatechars:30 }}</span>
+    </div>
+    {% endif %}
+    <div class="row">
+        <span class="label">Weight</span>
+        <span class="value">{{ order.weight_kg }} kg</span>
+    </div>
+    <div class="row">
+        <span class="label">Rate</span>
+        <span class="value">KSh {{ order.price_per_kg }}/kg</span>
+    </div>
+    <div class="row">
+        <span class="label">Collection Date</span>
+        <span class="value">{% if order.collection_date %}{{ order.collection_date|date:"M d, Y" }}{% else %}TBD{% endif %}</span>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <!-- Payment Summary -->
+    <div class="row total">
+        <span>TOTAL</span>
+        <strong>KSh {{ order.total_amount|floatformat:0 }}</strong>
+    </div>
+    <div class="row">
+        <span>Paid</span>
+        <span>KSh {{ order.paid_amount|floatformat:0 }}</span>
+    </div>
+    <div class="row" style="{% if order.remaining_balance > 0 %}color: #e74c3c; font-weight: bold;{% else %}color: #27ae60;{% endif %}">
+        <span>Balance</span>
+        <span>KSh {{ order.remaining_balance|floatformat:0 }}</span>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <!-- Status -->
+    <div class="row">
+        <span class="label">Order Status</span>
+        <span>{{ order.get_status_display }}</span>
+    </div>
+    
+    <!-- ===== FOOTER WITH COMPANY SETTINGS ===== -->
     <div class="footer">
-        <div>Thank you for choosing ZenClean!</div>
-        <div>Your clothes will be ready in 24 hours</div>
-        <div>Follow us on Instagram: @ZenClean</div>
+        <div class="brand">✦ {{ company_name|default:"ZenClean" }} Laundry ✦</div>
+        <div class="tagline">Quality Dry Cleaning & Laundry Services</div>
+        
+        <div class="contact">
+            📞 {{ company_phone|default:"0729 116 844" }} &nbsp;|&nbsp; 📧 {{ company_email|default:"info@zenclean.co.ke" }}
+        </div>
+        <div class="contact">
+            📍 {{ company_address|default:"Kasarani, Nairobi, Kenya" }}
+        </div>
+        
+        <div class="social">
+            🌐 <a href="{{ company_website|default:'https://www.tiktok.com/@zencleanlaundry' }}" target="_blank" style="color: #2c3e50; text-decoration: none;">{{ company_website|default:"www.zenclean.co.ke" }}</a> &nbsp;|&nbsp; 📱 @ZenClean
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="thankyou">🙏 Thank you for choosing {{ company_name|default:"ZenClean" }}!</div>
+        <div style="font-size: 11px; color: #7f8c8d; margin-top: 4px;">
+            Your satisfaction is our priority
+        </div>
+        
+        <div style="font-size: 10px; color: #bbb; margin-top: 4px;">
+            Order #{{ order.order_number }} • {{ order.created_at|date:"Y-m-d" }}
+        </div>
     </div>
     
+    <!-- Action Buttons -->
     <div class="no-print">
-        <button onclick="window.print()">Print Receipt</button>
-        <button onclick="window.close()">Close</button>
+        <button class="btn-whatsapp" onclick="shareToWhatsApp()">
+            <span class="whatsapp-icon">📱</span> Share via WhatsApp
+        </button>
+        <br><br>
+        <button class="btn-print" onclick="window.print()">🖨️ Print Receipt</button>
+        <button class="btn-close" onclick="window.close()">✕ Close</button>
     </div>
+
+    <script>
+        function shareToWhatsApp() {
+            var phone = "{{ order.customer.phone }}";
+            phone = phone.replace(/\s/g, '');
+            if (phone.startsWith('0')) {
+                phone = '254' + phone.substring(1);
+            }
+            if (!phone.startsWith('254')) {
+                phone = '254' + phone;
+            }
+            
+            var message = '🧺 {{ company_name|default:"ZenClean" }} Laundry - Receipt%0A%0A';
+            message += 'Order #: {{ order.order_number }}%0A';
+            message += 'Date: {{ order.created_at|date:"Y-m-d H:i" }}%0A%0A';
+            message += 'Customer: {{ order.customer.name }}%0A';
+            message += 'Phone: {{ order.customer.phone }}%0A';
+            message += 'Location: {{ order.customer.location|default:"N/A" }}%0A%0A';
+            message += 'Order Details:%0A';
+            message += '   Weight: {{ order.weight_kg }} kg%0A';
+            message += '   Rate: KSh {{ order.price_per_kg }}/kg%0A';
+            message += 'Total: KSh {{ order.total_amount|floatformat:0 }}%0A';
+            message += 'Paid: KSh {{ order.paid_amount|floatformat:0 }}%0A';
+            {% if order.remaining_balance > 0 %}
+            message += 'Balance: KSh {{ order.remaining_balance|floatformat:0 }}%0A';
+            {% else %}
+            message += 'Fully Paid%0A';
+            {% endif %}
+            message += 'Status: {{ order.get_status_display }}%0A%0A';
+            message += 'Thank you for choosing {{ company_name|default:"ZenClean" }}!%0A';
+            message += 'Ready in 24 hours';
+            
+            var url = 'https://wa.me/' + phone + '?text=' + message;
+            window.open(url, '_blank');
+        }
+    </script>
 </body>
 </html>
